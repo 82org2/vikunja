@@ -72,6 +72,10 @@ func GetTables() []interface{} {
 		&Session{},
 		&OAuthCode{},
 		&TimeEntry{},
+		&CustomFieldDefinition{},
+		&CustomFieldOption{},
+		&TaskCustomFieldValue{},
+		&CustomFieldValueOption{},
 	}
 }
 

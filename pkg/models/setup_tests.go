@@ -80,6 +80,10 @@ func SetupTests() {
 		"totp",
 		"oauth_codes",
 		"notifications",
+		"custom_field_definitions",
+		"custom_field_options",
+		"custom_field_values",
+		"custom_field_value_options",
 	)
 	if err != nil {
 		log.Fatal(err)

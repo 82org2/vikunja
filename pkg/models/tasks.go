@@ -1079,6 +1079,11 @@ func createTasks(s *xorm.Session, projectID int64, tasks []*Task, a web.Auth, up
 		}
 	}
 
+	// New task IDs are only known after the insert loop above.
+	if err := materialiseCustomFieldDefaults(s, projectID, tasks); err != nil {
+		return err
+	}
+
 	taskProvidedBucket, err := resolveProvidedBuckets(s, a, projectID, tasks)
 	if err != nil {
 		return err

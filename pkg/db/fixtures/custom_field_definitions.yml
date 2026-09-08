@@ -1,0 +1,59 @@
+- id: 1
+  project_id: 1
+  machine_key: impact
+  title: Impact
+  field_type: number
+  position: 1
+  show_on_card: true
+  configuration: '{"precision":1,"unit":"points"}'
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 2
+  project_id: 1
+  machine_key: target_date
+  title: Target Date
+  field_type: date
+  position: 2
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 3
+  project_id: 1
+  machine_key: status
+  title: Status
+  field_type: single_select
+  position: 3
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 4
+  project_id: 1
+  machine_key: tags
+  title: Tags
+  field_type: multi_select
+  position: 4
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 5
+  project_id: 1
+  machine_key: reviewed
+  title: Reviewed
+  field_type: boolean
+  position: 5
+  is_archived: true
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 6
+  project_id: 1
+  machine_key: owner
+  title: Owner
+  field_type: user
+  position: 6
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 7
+  project_id: 2
+  machine_key: vendor
+  title: Vendor
+  field_type: short_text
+  position: 1
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12

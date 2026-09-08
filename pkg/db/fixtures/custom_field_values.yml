@@ -1,0 +1,47 @@
+- id: 1
+  task_id: 1
+  definition_id: 1
+  value_number: 75
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 2
+  task_id: 1
+  definition_id: 2
+  value_date: 17862
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 3
+  task_id: 2
+  definition_id: 1
+  value_number: -25
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 4
+  task_id: 3
+  definition_id: 3
+  value_single_option_id: 2
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 5
+  task_id: 2
+  definition_id: 5
+  value_boolean: true
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 6
+  task_id: 3
+  definition_id: 6
+  value_user_id: 1
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 7
+  task_id: 2
+  definition_id: 4
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 8
+  task_id: 13
+  definition_id: 7
+  value_short_text: Nope
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12

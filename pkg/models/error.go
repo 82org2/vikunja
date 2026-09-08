@@ -2852,3 +2852,457 @@ func (err ErrUserDataExportDoesNotExist) HTTPError() web.HTTPError {
 		Message:  "No user data export found.",
 	}
 }
+
+// ===================
+// Custom field errors
+// ===================
+
+// ErrInvalidCustomFieldType represents an error where a definition or value
+// uses a field type that is not part of the supported enum.
+type ErrInvalidCustomFieldType struct {
+	Type string
+}
+
+// IsErrInvalidCustomFieldType checks if an error is a ErrInvalidCustomFieldType.
+func IsErrInvalidCustomFieldType(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldType)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldType) Error() string {
+	return fmt.Sprintf("Invalid custom field type [Type: %s]", err.Type)
+}
+
+// ErrCodeInvalidCustomFieldType holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldType = 19501
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldType) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldType,
+		Message:  fmt.Sprintf("Invalid custom field type %q.", err.Type),
+	}
+}
+
+// ErrInvalidCustomFieldKey represents an error where a definition or option
+// key does not match the documented machine-key expression.
+type ErrInvalidCustomFieldKey struct {
+	Key string
+}
+
+// IsErrInvalidCustomFieldKey checks if an error is a ErrInvalidCustomFieldKey.
+func IsErrInvalidCustomFieldKey(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldKey)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldKey) Error() string {
+	return fmt.Sprintf("Invalid custom field key [Key: %s]", err.Key)
+}
+
+// ErrCodeInvalidCustomFieldKey holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldKey = 19502
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldKey) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldKey,
+		Message:  "Custom field keys may only contain 64 lower-case ASCII characters (a-z, 0-9, underscore), starting with a letter.",
+	}
+}
+
+// ErrInvalidCustomFieldValue represents an error where a value does not match
+// its field type: the wrong typed column is set, more than one is populated,
+// a type-specific constraint is violated, or it does not match the definition.
+type ErrInvalidCustomFieldValue struct {
+	Message string
+}
+
+// IsErrInvalidCustomFieldValue checks if an error is a ErrInvalidCustomFieldValue.
+func IsErrInvalidCustomFieldValue(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldValue)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldValue) Error() string {
+	return fmt.Sprintf("Invalid custom field value [Message: %s]", err.Message)
+}
+
+// ErrCodeInvalidCustomFieldValue holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldValue = 19503
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldValue) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldValue,
+		Message:  err.Message,
+	}
+}
+
+// ErrInvalidCustomFieldNumber represents an error where a number value cannot
+// be parsed as a fixed-point decimal: too many fractional digits for the
+// configured precision, or a scaled value outside the signed 64-bit range.
+type ErrInvalidCustomFieldNumber struct {
+	Message string
+}
+
+// IsErrInvalidCustomFieldNumber checks if an error is a ErrInvalidCustomFieldNumber.
+func IsErrInvalidCustomFieldNumber(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldNumber)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldNumber) Error() string {
+	return fmt.Sprintf("Invalid custom field number [Message: %s]", err.Message)
+}
+
+// ErrCodeInvalidCustomFieldNumber holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldNumber = 19504
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldNumber) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldNumber,
+		Message:  err.Message,
+	}
+}
+
+// ErrInvalidCustomFieldDate represents an error where a date value is not a
+// valid ISO date in the format YYYY-MM-DD.
+type ErrInvalidCustomFieldDate struct {
+	Value string
+}
+
+// IsErrInvalidCustomFieldDate checks if an error is a ErrInvalidCustomFieldDate.
+func IsErrInvalidCustomFieldDate(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldDate)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldDate) Error() string {
+	return fmt.Sprintf("Invalid custom field date [Value: %s]", err.Value)
+}
+
+// ErrCodeInvalidCustomFieldDate holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldDate = 19505
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldDate) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldDate,
+		Message:  "Invalid date value; expected the format YYYY-MM-DD.",
+	}
+}
+
+// ErrInvalidCustomFieldURL represents an error where a URL value is not an
+// absolute HTTP(S) URL or exceeds the maximum length.
+type ErrInvalidCustomFieldURL struct {
+	Value string
+}
+
+// IsErrInvalidCustomFieldURL checks if an error is a ErrInvalidCustomFieldURL.
+func IsErrInvalidCustomFieldURL(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldURL)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldURL) Error() string {
+	return fmt.Sprintf("Invalid custom field url [Value: %s]", err.Value)
+}
+
+// ErrCodeInvalidCustomFieldURL holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldURL = 19506
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldURL) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldURL,
+		Message:  "Custom field URLs must be absolute HTTP(S) URLs of at most 2,048 characters.",
+	}
+}
+
+// ErrInvalidCustomFieldConfiguration represents an error where a field
+// definition's configuration is invalid or contains unknown properties.
+type ErrInvalidCustomFieldConfiguration struct {
+	Message string
+}
+
+// IsErrInvalidCustomFieldConfiguration checks if an error is a ErrInvalidCustomFieldConfiguration.
+func IsErrInvalidCustomFieldConfiguration(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldConfiguration)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldConfiguration) Error() string {
+	return fmt.Sprintf("Invalid custom field configuration [Message: %s]", err.Message)
+}
+
+// ErrCodeInvalidCustomFieldConfiguration holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldConfiguration = 19507
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldConfiguration) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldConfiguration,
+		Message:  err.Message,
+	}
+}
+
+// ErrCustomFieldDefinitionLimitReached represents an error where a project has
+// reached the maximum number of definitions.
+type ErrCustomFieldDefinitionLimitReached struct{}
+
+// IsErrCustomFieldDefinitionLimitReached checks if an error is a ErrCustomFieldDefinitionLimitReached.
+func IsErrCustomFieldDefinitionLimitReached(err error) bool {
+	_, ok := err.(ErrCustomFieldDefinitionLimitReached)
+	return ok
+}
+
+func (err ErrCustomFieldDefinitionLimitReached) Error() string {
+	return "Custom field definition limit reached"
+}
+
+// ErrCodeCustomFieldDefinitionLimitReached holds the unique world-error code of this error
+const ErrCodeCustomFieldDefinitionLimitReached = 19508
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldDefinitionLimitReached) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeCustomFieldDefinitionLimitReached,
+		Message:  "This project has reached the maximum of 100 custom field definitions.",
+	}
+}
+
+// ErrCustomFieldOptionLimitReached represents an error where a definition has
+// reached the maximum number of options.
+type ErrCustomFieldOptionLimitReached struct{}
+
+// IsErrCustomFieldOptionLimitReached checks if an error is a ErrCustomFieldOptionLimitReached.
+func IsErrCustomFieldOptionLimitReached(err error) bool {
+	_, ok := err.(ErrCustomFieldOptionLimitReached)
+	return ok
+}
+
+func (err ErrCustomFieldOptionLimitReached) Error() string {
+	return "Custom field option limit reached"
+}
+
+// ErrCodeCustomFieldOptionLimitReached holds the unique world-error code of this error
+const ErrCodeCustomFieldOptionLimitReached = 19509
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldOptionLimitReached) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeCustomFieldOptionLimitReached,
+		Message:  "This definition has reached the maximum of 200 options.",
+	}
+}
+
+// ErrCustomFieldDefinitionDoesNotExist represents an error where a custom field
+// definition does not exist.
+type ErrCustomFieldDefinitionDoesNotExist struct {
+	DefinitionID int64
+}
+
+// IsErrCustomFieldDefinitionDoesNotExist checks if an error is a ErrCustomFieldDefinitionDoesNotExist.
+func IsErrCustomFieldDefinitionDoesNotExist(err error) bool {
+	_, ok := err.(ErrCustomFieldDefinitionDoesNotExist)
+	return ok
+}
+
+func (err ErrCustomFieldDefinitionDoesNotExist) Error() string {
+	return fmt.Sprintf("Custom field definition does not exist [DefinitionID: %d]", err.DefinitionID)
+}
+
+// ErrCodeCustomFieldDefinitionDoesNotExist holds the unique world-error code of this error
+const ErrCodeCustomFieldDefinitionDoesNotExist = 19510
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldDefinitionDoesNotExist) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusNotFound,
+		Code:     ErrCodeCustomFieldDefinitionDoesNotExist,
+		Message:  "This custom field definition does not exist.",
+	}
+}
+
+// ErrCustomFieldOptionDoesNotExist represents an error where a custom field
+// option does not exist.
+type ErrCustomFieldOptionDoesNotExist struct {
+	OptionID int64
+}
+
+// IsErrCustomFieldOptionDoesNotExist checks if an error is a ErrCustomFieldOptionDoesNotExist.
+func IsErrCustomFieldOptionDoesNotExist(err error) bool {
+	_, ok := err.(ErrCustomFieldOptionDoesNotExist)
+	return ok
+}
+
+func (err ErrCustomFieldOptionDoesNotExist) Error() string {
+	return fmt.Sprintf("Custom field option does not exist [OptionID: %d]", err.OptionID)
+}
+
+// ErrCodeCustomFieldOptionDoesNotExist holds the unique world-error code of this error
+const ErrCodeCustomFieldOptionDoesNotExist = 19511
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldOptionDoesNotExist) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusNotFound,
+		Code:     ErrCodeCustomFieldOptionDoesNotExist,
+		Message:  "This custom field option does not exist.",
+	}
+}
+
+// ErrCustomFieldUserNotVisible represents an error where a user-type custom
+// field value references a user that is not active or not visible in the
+// definition's project.
+type ErrCustomFieldUserNotVisible struct {
+	UserID int64
+}
+
+// IsErrCustomFieldUserNotVisible checks if an error is a ErrCustomFieldUserNotVisible.
+func IsErrCustomFieldUserNotVisible(err error) bool {
+	_, ok := err.(ErrCustomFieldUserNotVisible)
+	return ok
+}
+
+func (err ErrCustomFieldUserNotVisible) Error() string {
+	return fmt.Sprintf("Custom field user not visible [UserID: %d]", err.UserID)
+}
+
+// ErrCodeCustomFieldUserNotVisible holds the unique world-error code of this error
+const ErrCodeCustomFieldUserNotVisible = 19512
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldUserNotVisible) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeCustomFieldUserNotVisible,
+		Message:  "The referenced user is not active or not visible in this project.",
+	}
+}
+
+// ErrCustomFieldValueDoesNotExist represents an error where setting or unsetting
+// a task value referenced a value row that does not exist.
+type ErrCustomFieldValueDoesNotExist struct {
+	ValueID int64
+}
+
+// IsErrCustomFieldValueDoesNotExist checks if an error is a ErrCustomFieldValueDoesNotExist.
+func IsErrCustomFieldValueDoesNotExist(err error) bool {
+	_, ok := err.(ErrCustomFieldValueDoesNotExist)
+	return ok
+}
+
+func (err ErrCustomFieldValueDoesNotExist) Error() string {
+	return fmt.Sprintf("Custom field value does not exist [ValueID: %d]", err.ValueID)
+}
+
+// ErrCodeCustomFieldValueDoesNotExist holds the unique world-error code of this error
+const ErrCodeCustomFieldValueDoesNotExist = 19513
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldValueDoesNotExist) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusNotFound,
+		Code:     ErrCodeCustomFieldValueDoesNotExist,
+		Message:  "This custom field value does not exist.",
+	}
+}
+
+// ErrInvalidCustomFieldDefinition represents an error where a definition fails
+// validation, e.g. a title or description outside its limits.
+type ErrInvalidCustomFieldDefinition struct {
+	Message string
+}
+
+// IsErrInvalidCustomFieldDefinition checks if an error is a ErrInvalidCustomFieldDefinition.
+func IsErrInvalidCustomFieldDefinition(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldDefinition)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldDefinition) Error() string {
+	return fmt.Sprintf("Invalid custom field definition [Message: %s]", err.Message)
+}
+
+// ErrCodeInvalidCustomFieldDefinition holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldDefinition = 19514
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldDefinition) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldDefinition,
+		Message:  err.Message,
+	}
+}
+
+// ErrCustomFieldConfigurationChangeInvalidatesValues represents an error where
+// changing a definition's configuration would invalidate stored values.
+type ErrCustomFieldConfigurationChangeInvalidatesValues struct {
+	Message string
+}
+
+// IsErrCustomFieldConfigurationChangeInvalidatesValues checks if an error is a
+// ErrCustomFieldConfigurationChangeInvalidatesValues.
+func IsErrCustomFieldConfigurationChangeInvalidatesValues(err error) bool {
+	_, ok := err.(ErrCustomFieldConfigurationChangeInvalidatesValues)
+	return ok
+}
+
+func (err ErrCustomFieldConfigurationChangeInvalidatesValues) Error() string {
+	return fmt.Sprintf("Custom field configuration change invalidates values [Message: %s]", err.Message)
+}
+
+// ErrCodeCustomFieldConfigurationChangeInvalidatesValues holds the unique
+// world-error code of this error
+const ErrCodeCustomFieldConfigurationChangeInvalidatesValues = 19515
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldConfigurationChangeInvalidatesValues) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeCustomFieldConfigurationChangeInvalidatesValues,
+		Message:  err.Message,
+	}
+}
+
+// ErrInvalidCustomFieldOption represents an error where an option fails
+// validation: a label outside its limits, being attached to a non-select
+// definition, or violating an immutability rule.
+type ErrInvalidCustomFieldOption struct {
+	Message string
+}
+
+// IsErrInvalidCustomFieldOption checks if an error is a ErrInvalidCustomFieldOption.
+func IsErrInvalidCustomFieldOption(err error) bool {
+	_, ok := err.(ErrInvalidCustomFieldOption)
+	return ok
+}
+
+func (err ErrInvalidCustomFieldOption) Error() string {
+	return fmt.Sprintf("Invalid custom field option [Message: %s]", err.Message)
+}
+
+// ErrCodeInvalidCustomFieldOption holds the unique world-error code of this error
+const ErrCodeInvalidCustomFieldOption = 19516
+
+// HTTPError holds the http error description
+func (err ErrInvalidCustomFieldOption) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusBadRequest,
+		Code:     ErrCodeInvalidCustomFieldOption,
+		Message:  err.Message,
+	}
+}

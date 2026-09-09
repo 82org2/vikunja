@@ -48,6 +48,8 @@ type SavedFilter struct {
 	// True if the filter is a favorite. Favorite filters show up in a separate parent project together with favorite projects.
 	IsFavorite bool `xorm:"default false" json:"is_favorite" doc:"If true, the filter shows up in the Favorites pseudo-project alongside favorite projects."`
 
+	AllowCustomFieldFilters bool `xorm:"-" json:"-"`
+
 	// A timestamp when this filter was created. You cannot change this value.
 	Created time.Time `xorm:"created not null" json:"created" readOnly:"true" doc:"A timestamp when this filter was created. You cannot change this value."`
 	// A timestamp when this filter was last updated. You cannot change this value.
@@ -128,7 +130,7 @@ func (sf *SavedFilter) ToProject() *Project {
 // @Failure 500 {object} models.Message "Internal error"
 // @Router /filters [put]
 func (sf *SavedFilter) Create(s *xorm.Session, auth web.Auth) (err error) {
-	_, err = getTaskFiltersFromFilterString(sf.Filters.Filter, sf.Filters.FilterTimezone)
+	_, err = getTaskFiltersFromFilterString(sf.Filters.Filter, sf.Filters.FilterTimezone, sf.AllowCustomFieldFilters)
 	if err != nil {
 		return
 	}
@@ -208,7 +210,7 @@ func (sf *SavedFilter) Update(s *xorm.Session, _ web.Auth) error {
 		sf.Filters = origFilter.Filters
 	}
 
-	_, err = getTaskFiltersFromFilterString(sf.Filters.Filter, sf.Filters.FilterTimezone)
+	_, err = getTaskFiltersFromFilterString(sf.Filters.Filter, sf.Filters.FilterTimezone, sf.AllowCustomFieldFilters)
 	if err != nil {
 		return err
 	}
@@ -336,9 +338,16 @@ func dropFiltersWithInactiveOwners(s *xorm.Session, filters map[int64]*SavedFilt
 	return timezoneByOwner, nil
 }
 
-func parseFilterCond(filter, timezone string, includeNulls bool) (cond builder.Cond, joinTaskBuckets bool, err error) {
-	parsedFilters, err := getTaskFiltersFromFilterString(filter, timezone)
+func parseFilterCond(s *xorm.Session, projectIDs []int64, filter, timezone string, includeNulls bool) (cond builder.Cond, joinTaskBuckets bool, err error) {
+	parsedFilters, err := getTaskFiltersFromFilterString(filter, timezone, true)
 	if err != nil {
+		return nil, false, err
+	}
+
+	// Custom-field filters resolve against the candidate projects' definitions
+	// before the condition is built. An inconsistent key fails validation here;
+	// the cron callers skip the filter via isErrInvalidFilter.
+	if err := resolveCustomFieldFilters(s, projectIDs, parsedFilters, nil); err != nil {
 		return nil, false, err
 	}
 
@@ -547,7 +556,22 @@ func matchTasksToViewsOfFilter(s *xorm.Session, tasks []*Task, filter *SavedFilt
 		timezone = fallbackTimezone
 	}
 
-	cond, joinTaskBuckets, err := parseFilterCond(filter.Filters.Filter, timezone, filter.Filters.FilterIncludeNulls)
+	// Custom-field filters resolve against the candidate tasks' projects, so the
+	// project ids must be known before the condition is built.
+	candidateIDs := []int64{}
+	projectIDSet := map[int64]struct{}{}
+	for _, task := range tasks {
+		if accessByProject[task.ProjectID][filter.OwnerID] {
+			candidateIDs = append(candidateIDs, task.ID)
+			projectIDSet[task.ProjectID] = struct{}{}
+		}
+	}
+	projectIDs := make([]int64, 0, len(projectIDSet))
+	for id := range projectIDSet {
+		projectIDs = append(projectIDs, id)
+	}
+
+	cond, joinTaskBuckets, err := parseFilterCond(s, projectIDs, filter.Filters.Filter, timezone, filter.Filters.FilterIncludeNulls)
 	if err != nil {
 		if !isErrInvalidFilter(err) {
 			return nil, err
@@ -556,12 +580,6 @@ func matchTasksToViewsOfFilter(s *xorm.Session, tasks []*Task, filter *SavedFilt
 		return viewsByTask, nil
 	}
 
-	candidateIDs := []int64{}
-	for _, task := range tasks {
-		if accessByProject[task.ProjectID][filter.OwnerID] {
-			candidateIDs = append(candidateIDs, task.ID)
-		}
-	}
 	if len(candidateIDs) == 0 {
 		return viewsByTask, nil
 	}

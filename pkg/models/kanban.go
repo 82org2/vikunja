@@ -251,7 +251,7 @@ func GetTasksInBucketsForView(s *xorm.Session, view *ProjectView, projects []*Pr
 			} else {
 				filterString = "(" + originalFilter + ") && " + bucketFilter
 			}
-			opts.parsedFilters, err = getTaskFiltersFromFilterString(filterString, opts.filterTimezone)
+			opts.parsedFilters, err = getTaskFiltersFromFilterString(filterString, opts.filterTimezone, opts.allowCustomFieldFilters)
 			if err != nil {
 				return
 			}

@@ -61,6 +61,19 @@ type TaskCollection struct {
 	// custom_fields for v1, which must not execute the expansion.
 	ExpandCustomFields bool `xorm:"-" json:"-"`
 
+	// AllowCustomFieldFilters is the v2-only signal that custom_fields.<key>
+	// filter and sort fields are accepted. v1 never sets it, so the shared
+	// parser rejects custom-field filters on frozen v1 routes.
+	AllowCustomFieldFilters bool `xorm:"-" json:"-"`
+
+	// CustomFieldFilterScopeSatisfied is the v2-only signal that the auth may
+	// filter or sort by custom fields. The route layer sets it from the API
+	// token's custom_fields.read_all scope; user sessions and link shares are
+	// always allowed. ReadAll enforces it against the effective filter and sort
+	// merged from saved filters and project views, which the URL-param scope
+	// check in the auth middleware cannot see.
+	CustomFieldFilterScopeSatisfied bool `xorm:"-" json:"-"`
+
 	isSavedFilter bool
 
 	// forceFlatTasks makes ReadAll always return []*Task, never []*Bucket, even
@@ -131,8 +144,14 @@ func validateTaskField(fieldName string) error {
 		taskPropertyAssignees,
 		taskPropertyLabels,
 		taskPropertyReminders,
-		taskPropertyCreatedBy:
+		taskPropertyCreatedBy,
+		"parent_project",
+		"parent_project_id":
 		return nil
+	}
+
+	if strings.HasPrefix(fieldName, customFieldFilterNamespace) {
+		return validateCustomFieldKey(strings.TrimPrefix(fieldName, customFieldFilterNamespace))
 	}
 
 	return validateTaskFieldForSorting(fieldName)
@@ -159,6 +178,12 @@ func getTaskFilterOptsFromCollection(tf *TaskCollection, projectView *ProjectVie
 			param.projectViewID = projectView.ID
 		}
 
+		// Custom-field sorts are v2-only, like custom-field filters: v1 never
+		// sets AllowCustomFieldFilters, so it rejects sort_by=custom_fields.<key>.
+		if strings.HasPrefix(s, customFieldFilterNamespace) && !tf.AllowCustomFieldFilters {
+			return nil, ErrInvalidTaskField{TaskField: s}
+		}
+
 		// Param validation
 		if err := param.validate(); err != nil {
 			return nil, err
@@ -167,19 +192,30 @@ func getTaskFilterOptsFromCollection(tf *TaskCollection, projectView *ProjectVie
 	}
 
 	opts = &taskSearchOptions{
-		sortby:             sort,
-		userProvidedSort:   len(tf.SortBy) > 0,
-		filterIncludeNulls: tf.FilterIncludeNulls,
-		filter:             tf.Filter,
-		filterTimezone:     tf.FilterTimezone,
+		sortby:                  sort,
+		userProvidedSort:        len(tf.SortBy) > 0,
+		filterIncludeNulls:      tf.FilterIncludeNulls,
+		filter:                  tf.Filter,
+		filterTimezone:          tf.FilterTimezone,
+		allowCustomFieldFilters: tf.AllowCustomFieldFilters,
 	}
 
 	if projectView != nil {
 		opts.projectViewID = projectView.ID
 	}
 
-	opts.parsedFilters, err = getTaskFiltersFromFilterString(tf.Filter, tf.FilterTimezone)
+	opts.parsedFilters, err = getTaskFiltersFromFilterString(tf.Filter, tf.FilterTimezone, tf.AllowCustomFieldFilters)
 	return opts, err
+}
+
+// customFieldFilterScopeDenied reports whether the effective filter or sort
+// references custom fields while the auth is not allowed to use them. The
+// effective filter and sort include anything merged from a saved filter or
+// project view, which the URL-param scope check in the auth middleware cannot
+// see.
+func customFieldFilterScopeDenied(tf *TaskCollection, opts *taskSearchOptions) bool {
+	return !tf.CustomFieldFilterScopeSatisfied &&
+		(filtersReferenceCustomFields(opts.parsedFilters) || sortsReferenceCustomFields(opts.sortby))
 }
 
 // SetForceFlatTasks makes ReadAll return a flat []*Task even for a kanban view.
@@ -329,6 +365,8 @@ func (tf *TaskCollection) ReadAll(s *xorm.Session, a web.Auth, search string, pa
 		tc.isSavedFilter = true
 		tc.Expand = tf.Expand
 		tc.ExpandCustomFields = tf.ExpandCustomFields
+		tc.AllowCustomFieldFilters = tf.AllowCustomFieldFilters
+		tc.CustomFieldFilterScopeSatisfied = tf.CustomFieldFilterScopeSatisfied
 		tc.forceFlatTasks = tf.forceFlatTasks
 
 		if tf.Filter != "" {
@@ -384,6 +422,14 @@ func (tf *TaskCollection) ReadAll(s *xorm.Session, a web.Auth, search string, pa
 	opts, err := getTaskFilterOptsFromCollection(tf, view)
 	if err != nil {
 		return nil, 0, 0, err
+	}
+
+	// The effective filter and sort now include anything merged from a saved
+	// filter or project view, which the URL-param scope check in the auth
+	// middleware cannot see. An API token without custom_fields.read_all must not
+	// filter or sort by custom fields through those paths either.
+	if customFieldFilterScopeDenied(tf, opts) {
+		return nil, 0, 0, ErrGenericForbidden{}
 	}
 
 	if err := tf.validateExpand(); err != nil {

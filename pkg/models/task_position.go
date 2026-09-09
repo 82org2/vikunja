@@ -390,7 +390,7 @@ func RecalculateTaskPositions(s *xorm.Session, view *ProjectView, a web.Auth) (e
 		opts.filterIncludeNulls = sf.Filters.FilterIncludeNulls
 		opts.filterTimezone = sf.Filters.FilterTimezone
 		opts.filter = sf.Filters.Filter
-		opts.parsedFilters, err = getTaskFiltersFromFilterString(opts.filter, opts.filterTimezone)
+		opts.parsedFilters, err = getTaskFiltersFromFilterString(opts.filter, opts.filterTimezone, true)
 		if err != nil {
 			return err
 		}
@@ -731,17 +731,17 @@ func ensureTaskPositionsForSavedFilterView(s *xorm.Session, a web.Auth, projects
 		return nil
 	}
 
-	// Parse a fresh copy of the filters because convertFiltersToDBFilterCond mutates the
-	// field names in place — reusing opts.parsedFilters would double-prefix them for the
-	// subsequent fetch query.
-	filterCond, joinTaskBuckets, err := parseFilterCond(opts.filter, opts.filterTimezone, opts.filterIncludeNulls)
-	if err != nil {
-		return err
-	}
-
 	projectIDs, _ := getProjectIDsFromProjects(projects)
 	if len(projectIDs) == 0 {
 		return nil
+	}
+
+	// Parse a fresh copy of the filters because convertFiltersToDBFilterCond mutates the
+	// field names in place — reusing opts.parsedFilters would double-prefix them for the
+	// subsequent fetch query.
+	filterCond, joinTaskBuckets, err := parseFilterCond(s, projectIDs, opts.filter, opts.filterTimezone, opts.filterIncludeNulls)
+	if err != nil {
+		return err
 	}
 
 	query := s.

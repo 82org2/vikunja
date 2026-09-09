@@ -34,7 +34,7 @@ func TestFilterComplexityLimits(t *testing.T) {
 	}
 
 	t.Run("task filter: depth 100 passes", func(t *testing.T) {
-		filters, err := getTaskFiltersFromFilterString(parens(100), "UTC")
+		filters, err := getTaskFiltersFromFilterString(parens(100), "UTC", true)
 		require.NoError(t, err)
 		require.Len(t, filters, 1)
 	})
@@ -42,7 +42,7 @@ func TestFilterComplexityLimits(t *testing.T) {
 	t.Run("task filter: depth 101 is rejected with a small byte size", func(t *testing.T) {
 		filter := parens(101)
 		require.Less(t, len(filter), 4096, "the depth check must reject independently of the byte cap")
-		_, err := getTaskFiltersFromFilterString(filter, "UTC")
+		_, err := getTaskFiltersFromFilterString(filter, "UTC", true)
 		require.Error(t, err)
 		var tooComplex *ErrFilterTooComplex
 		require.ErrorAs(t, err, &tooComplex)
@@ -63,7 +63,7 @@ func TestFilterComplexityLimits(t *testing.T) {
 
 	t.Run("oversized input is rejected without being echoed", func(t *testing.T) {
 		filter := strings.Repeat("done = false && ", 1300) // ~20 KiB
-		_, err := getTaskFiltersFromFilterString(filter, "UTC")
+		_, err := getTaskFiltersFromFilterString(filter, "UTC", true)
 		require.Error(t, err)
 		var tooComplex *ErrFilterTooComplex
 		require.ErrorAs(t, err, &tooComplex)
@@ -80,7 +80,7 @@ func TestFilterComplexityLimits(t *testing.T) {
 			return filter
 		}
 
-		_, err := getTaskFiltersFromFilterString(oversized("project not in 1"), "UTC")
+		_, err := getTaskFiltersFromFilterString(oversized("project not in 1"), "UTC", true)
 		require.Error(t, err)
 		assert.True(t, IsErrFilterTooComplex(err))
 
@@ -94,7 +94,7 @@ func TestFilterComplexityLimits(t *testing.T) {
 		require.Less(t, len(filter), maxFilterBytes)
 		require.Greater(t, len(preprocessFilterString(filter)), maxFilterBytes)
 
-		_, err := getTaskFiltersFromFilterString(filter, "UTC")
+		_, err := getTaskFiltersFromFilterString(filter, "UTC", true)
 		require.Error(t, err)
 		assert.True(t, IsErrFilterTooComplex(err))
 
@@ -105,19 +105,19 @@ func TestFilterComplexityLimits(t *testing.T) {
 
 	t.Run("parens inside quotes do not count toward depth", func(t *testing.T) {
 		quoted := "'" + strings.Repeat("(", 200) + "'"
-		filters, err := getTaskFiltersFromFilterString("title = "+quoted+" && done = false", "UTC")
+		filters, err := getTaskFiltersFromFilterString("title = "+quoted+" && done = false", "UTC", true)
 		require.NoError(t, err)
 		require.Len(t, filters, 2)
 	})
 
 	t.Run("escaped quotes keep the quoted run intact", func(t *testing.T) {
-		_, err := getTaskFiltersFromFilterString("title = 'a \\'' "+strings.Repeat("( ", 150)+"done = false"+strings.Repeat(" )", 150), "UTC")
+		_, err := getTaskFiltersFromFilterString("title = 'a \\'' "+strings.Repeat("( ", 150)+"done = false"+strings.Repeat(" )", 150), "UTC", true)
 		require.Error(t, err)
 		assert.True(t, IsErrFilterTooComplex(err), "depth after a correctly terminated escaped-quote run must still be tracked")
 	})
 
 	t.Run("unmatched closing parenthesis is rejected", func(t *testing.T) {
-		_, err := getTaskFiltersFromFilterString("done = true)", "UTC")
+		_, err := getTaskFiltersFromFilterString("done = true)", "UTC", true)
 		require.Error(t, err)
 		assert.True(t, IsErrInvalidFilterExpression(err))
 	})
@@ -130,7 +130,7 @@ func TestErrFilterTooComplexHTTPErrorCode(t *testing.T) {
 }
 
 func TestIsErrInvalidFilterMatchesParseErrors(t *testing.T) {
-	_, err := getTaskFiltersFromFilterString("done = true &&", "UTC")
+	_, err := getTaskFiltersFromFilterString("done = true &&", "UTC", true)
 	require.Error(t, err)
 	assert.True(t, IsErrInvalidFilterExpression(err), "the checker must match what the parse paths actually return")
 	assert.True(t, isErrInvalidFilter(err))

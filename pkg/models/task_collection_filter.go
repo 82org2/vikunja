@@ -47,6 +47,8 @@ const (
 	taskFilterComparatorLike         taskFilterComparator = "like"
 	taskFilterComparatorIn           taskFilterComparator = "in"
 	taskFilterComparatorNotIn        taskFilterComparator = "not in"
+	taskFilterComparatorIsNull       taskFilterComparator = "is null"
+	taskFilterComparatorIsNotNull    taskFilterComparator = "is not null"
 )
 
 // Guess what you get back if you ask Safari for a rfc 3339 formatted date?
@@ -59,7 +61,18 @@ type taskFilter struct {
 	comparator taskFilterComparator
 	isNumeric  bool
 	join       taskFilterConcatinator
+
+	// customFieldKey is the machine key of a custom_fields.<key> filter. The
+	// value stays a raw string until the definition is resolved in the search
+	// step, where customFieldDefs is populated per project.
+	customFieldKey  string
+	customFieldDefs map[int64]*CustomFieldDefinition
 }
+
+// customFieldFilterNamespace prefixes the filter and sort field names that
+// address a custom field. Machine keys match ^[a-z][a-z0-9_]{0,63}$, so the
+// dot unambiguously separates the namespace from the key.
+const customFieldFilterNamespace = "custom_fields."
 
 // clampDateToDriverRange lifts boundaries with year < 1 back into year 1:
 // converting the zero-date sentinel to UTC from a timezone east of Greenwich
@@ -115,7 +128,7 @@ func parseTimeFromUserInput(timeString string, loc *time.Location) (value time.T
 	return value, err
 }
 
-func parseFilterFromExpression(f fexpr.ExprGroup, loc *time.Location) (filter *taskFilter, err error) {
+func parseFilterFromExpression(f fexpr.ExprGroup, loc *time.Location, allowCustomFields bool) (filter *taskFilter, err error) {
 	filter = &taskFilter{
 		join: filterConcatAnd,
 	}
@@ -124,10 +137,12 @@ func parseFilterFromExpression(f fexpr.ExprGroup, loc *time.Location) (filter *t
 	}
 
 	var value string
+	var rightType fexpr.TokenType
 	switch v := f.Item.(type) {
 	case fexpr.Expr:
 		filter.field = v.Left.Literal
 		value = v.Right.Literal
+		rightType = v.Right.Type
 		filter.comparator, err = getFilterComparatorFromOp(v.Op)
 		if err != nil {
 			return
@@ -135,7 +150,7 @@ func parseFilterFromExpression(f fexpr.ExprGroup, loc *time.Location) (filter *t
 	case []fexpr.ExprGroup:
 		values := make([]*taskFilter, 0, len(v))
 		for _, expression := range v {
-			subfilter, err := parseFilterFromExpression(expression, loc)
+			subfilter, err := parseFilterFromExpression(expression, loc, allowCustomFields)
 			if err != nil {
 				return nil, err
 			}
@@ -143,6 +158,23 @@ func parseFilterFromExpression(f fexpr.ExprGroup, loc *time.Location) (filter *t
 		}
 		filter.value = values
 		return
+	}
+
+	// The preprocess step rewrites the explicit `is null` / `is not null`
+	// operators to `= <sentinel>` / `!= <sentinel>`. Only that rewrite produces
+	// the sentinel as an unquoted identifier; a user value that literally
+	// contains it is quoted by the preprocess step and parses as a text token,
+	// so it never reaches this branch.
+	if rightType == fexpr.TokenIdentifier && value == nullFilterSentinel {
+		switch filter.comparator {
+		case taskFilterComparatorEquals:
+			filter.comparator = taskFilterComparatorIsNull
+		case taskFilterComparatorNotEquals:
+			filter.comparator = taskFilterComparatorIsNotNull
+		default:
+			return nil, ErrInvalidTaskFilterValue{Field: filter.field, Value: value}
+		}
+		value = ""
 	}
 
 	err = validateTaskFieldComparator(filter.comparator)
@@ -159,6 +191,24 @@ func parseFilterFromExpression(f fexpr.ExprGroup, loc *time.Location) (filter *t
 	err = validateTaskField(filter.field)
 	if err != nil {
 		return nil, err
+	}
+
+	if strings.HasPrefix(filter.field, customFieldFilterNamespace) {
+		if !allowCustomFields {
+			return nil, ErrInvalidTaskField{TaskField: filter.field}
+		}
+		filter.customFieldKey = strings.TrimPrefix(filter.field, customFieldFilterNamespace)
+		// The definition's type is unknown here (no DB access), so the value
+		// stays a raw string and is cast in the search step after resolution.
+		if filter.comparator != taskFilterComparatorIsNull && filter.comparator != taskFilterComparatorIsNotNull {
+			filter.value = value
+		}
+		return filter, nil
+	}
+
+	// The null comparators carry no value; casting an empty string would fail.
+	if filter.comparator == taskFilterComparatorIsNull || filter.comparator == taskFilterComparatorIsNotNull {
+		return filter, nil
 	}
 
 	reflectValue, filter.value, err = getNativeValueForTaskField(filter.field, filter.comparator, value, loc)
@@ -238,14 +288,17 @@ func replaceFilterOperators(filter string) string {
 	return out.String()
 }
 
-// preprocessFilterString rewrites the human filter syntax (in / not in / like)
-// into fexpr sigils and quotes bare values so fexpr.Parse accepts them. Shared
-// by every entity that filters with the task grammar.
+// preprocessFilterString rewrites the human filter syntax (in / not in / like /
+// is null / is not null) into fexpr sigils and quotes bare values so
+// fexpr.Parse accepts them. Shared by every entity that filters with the task
+// grammar.
 func preprocessFilterString(filter string) string {
 	filter = replaceFilterOperators(filter)
 
-	re := regexp.MustCompile(`(\w+)\s*(>=|<=|!=|~|\?=|\?!=|=|>|<)\s*([^&|()]+)`)
-	return re.ReplaceAllStringFunc(filter, func(match string) string {
+	// The field group allows dots so custom_fields.<machine_key> is captured as
+	// one field name; fexpr treats '.' as an identifier combine rune.
+	re := regexp.MustCompile(`([\w.]+)\s*(>=|<=|!=|~|\?=|\?!=|=|>|<)\s*([^&|()]+)`)
+	filter = re.ReplaceAllStringFunc(filter, func(match string) string {
 		parts := re.FindStringSubmatch(match)
 		if len(parts) != 4 {
 			return match
@@ -264,6 +317,75 @@ func preprocessFilterString(filter string) string {
 		quotedValue := "'" + strings.ReplaceAll(value, "'", "\\'") + "'"
 		return field + " " + comparator + " " + quotedValue
 	})
+
+	// The is null / is not null rewrite runs after bare values are quoted so
+	// the sentinel is always unquoted and user text containing it stays a
+	// quoted string.
+	return rewriteNullOperators(filter)
+}
+
+// nullFilterSentinel is the internal marker produced only by the explicit
+// `is null` / `is not null` rewrite. It is never quoted, so fexpr parses it as
+// an identifier and parseFilterFromExpression converts it to the null
+// comparators. A user value that literally contains the sentinel is quoted by
+// the preprocess step and therefore never matches.
+const nullFilterSentinel = "__VIKUNJA_NULL__"
+
+// rewriteNullOperators rewrites the explicit `is null` / `is not null`
+// operators to `= <sentinel>` / `!= <sentinel>` outside quoted regions, with
+// word boundaries so `this is null` inside a value is untouched. The rewrite
+// runs after bare values are quoted, so the sentinel is always unquoted.
+func rewriteNullOperators(filter string) string {
+	var out strings.Builder
+	out.Grow(len(filter))
+
+	for i := 0; i < len(filter); {
+		if c := filter[i]; c == '\'' || c == '"' {
+			if end := quotedRunEnd(filter, i); end > 0 {
+				out.WriteString(filter[i:end])
+				i = end
+				continue
+			}
+		}
+
+		// Match "is not null" before "is null" so the longer operator wins.
+		matched := false
+		for _, op := range []struct {
+			literal string
+			repl    string
+		}{
+			{"is not null", "!= " + nullFilterSentinel},
+			{"is null", "= " + nullFilterSentinel},
+		} {
+			if !strings.HasPrefix(filter[i:], op.literal) {
+				continue
+			}
+			beforeOK := i == 0 || !isFilterWordRune(filter[i-1])
+			after := i + len(op.literal)
+			afterOK := after >= len(filter) || !isFilterWordRune(filter[after])
+			if beforeOK && afterOK {
+				out.WriteString(op.repl)
+				i = after
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+
+		out.WriteByte(filter[i])
+		i++
+	}
+
+	return out.String()
+}
+
+// isFilterWordRune reports whether c can continue a filter identifier or value
+// word, used to bound the is null / is not null rewrite to whole words.
+func isFilterWordRune(c byte) bool {
+	return c == '_' || c == '.' || c == ':' ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 // These caps block GHSA-xxc3-xpmc-vmvr before fexpr allocates while leaving
@@ -324,7 +446,12 @@ func prepareFilterForParsing(filter string) (string, error) {
 	return filter, nil
 }
 
-func getTaskFiltersFromFilterString(filter string, filterTimezone string) (filters []*taskFilter, err error) {
+// getTaskFiltersFromFilterString parses the filter grammar into taskFilter
+// structs. allowCustomFields gates the custom_fields.<key> namespace: v1 task
+// collections pass false so the shared parser does not enable custom-field
+// filtering on frozen v1 routes; saved filters, project views, and re-parses
+// pass true.
+func getTaskFiltersFromFilterString(filter string, filterTimezone string, allowCustomFields bool) (filters []*taskFilter, err error) {
 
 	if filter == "" {
 		return
@@ -356,7 +483,7 @@ func getTaskFiltersFromFilterString(filter string, filterTimezone string) (filte
 
 	filters = make([]*taskFilter, 0, len(parsedFilter))
 	for _, f := range parsedFilter {
-		parsedFilter, err := parseFilterFromExpression(f, loc)
+		parsedFilter, err := parseFilterFromExpression(f, loc, allowCustomFields)
 		if err != nil {
 			return nil, err
 		}
@@ -387,7 +514,9 @@ func validateTaskFieldComparator(comparator taskFilterComparator) error {
 		taskFilterComparatorNotEquals,
 		taskFilterComparatorLike,
 		taskFilterComparatorIn,
-		taskFilterComparatorNotIn:
+		taskFilterComparatorNotIn,
+		taskFilterComparatorIsNull,
+		taskFilterComparatorIsNotNull:
 		return nil
 	case taskFilterComparatorInvalid:
 		fallthrough
@@ -511,6 +640,22 @@ func getNativeValueForTaskField(fieldName string, comparator taskFilterComparato
 			valueSlice = append(valueSlice, val)
 		}
 		return nil, valueSlice, nil
+	}
+	if realFieldName == "ParentProject" || realFieldName == "ParentProjectID" {
+		if comparator == taskFilterComparatorIn || comparator == taskFilterComparatorNotIn {
+			vals := strings.Split(value, ",")
+			valueSlice := make([]interface{}, 0, len(vals))
+			for _, val := range vals {
+				parsed, parseErr := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+				if parseErr != nil {
+					return nil, nil, parseErr
+				}
+				valueSlice = append(valueSlice, parsed)
+			}
+			return nil, valueSlice, nil
+		}
+		parsed, parseErr := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		return nil, parsed, parseErr
 	}
 
 	field, ok := reflect.TypeOf(&Task{}).Elem().FieldByName(realFieldName)

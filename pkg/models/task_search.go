@@ -129,6 +129,73 @@ func (sf *SubTableFilter) ToBaseSubQuery(taskAlias string) *builder.Builder {
 	return cond
 }
 
+// subTableNullCond builds the EXISTS/NOT EXISTS condition for an is null /
+// is not null filter on a relation-backed field. It reports whether the
+// comparator was a null operator; other comparators return (nil, false).
+func subTableNullCond(sf SubTableFilter, comparator taskFilterComparator, taskAlias string) (builder.Cond, bool) {
+	if sf.FilterableField == "parent_project_id" {
+		base := sf.ToBaseSubQuery(taskAlias)
+		if comparator == taskFilterComparatorIsNull {
+			return builder.Exists(base.And(&builder.IsNull{sf.FilterableField})), true
+		}
+		if comparator == taskFilterComparatorIsNotNull {
+			return builder.Exists(base.And(&builder.NotNull{sf.FilterableField})), true
+		}
+		return nil, false
+	}
+	if comparator == taskFilterComparatorIsNull {
+		return builder.NotExists(sf.ToBaseSubQuery(taskAlias)), true
+	}
+	if comparator == taskFilterComparatorIsNotNull {
+		return builder.Exists(sf.ToBaseSubQuery(taskAlias)), true
+	}
+	return nil, false
+}
+
+// buildSubTableGroupCond combines a group of consecutive same-table filters into
+// one EXISTS/NOT EXISTS subquery. Strict comparators (equality/IN) are rewritten
+// to IN because each matching value lives in its own row; range comparators
+// combine into a single row condition.
+func buildSubTableGroupCond(group []*taskFilter, sf SubTableFilter, taskAlias string, includeNulls bool) (builder.Cond, error) {
+	var combinedInnerCond builder.Cond
+	for _, gf := range group {
+		comparator := gf.comparator
+		if _, isStrict := strictComparators[gf.comparator]; isStrict {
+			comparator = taskFilterComparatorIn
+		}
+
+		innerFilter, err := getFilterCond(&taskFilter{
+			field:      sf.FilterableField,
+			value:      gf.value,
+			comparator: comparator,
+			isNumeric:  gf.isNumeric,
+		}, false)
+		if err != nil {
+			return nil, err
+		}
+
+		if combinedInnerCond == nil {
+			combinedInnerCond = innerFilter
+		} else {
+			combinedInnerCond = builder.And(combinedInnerCond, innerFilter)
+		}
+	}
+
+	filterSubQuery := sf.ToBaseSubQuery(taskAlias).And(combinedInnerCond)
+
+	var filter builder.Cond
+	if group[0].comparator == taskFilterComparatorNotEquals || group[0].comparator == taskFilterComparatorNotIn {
+		filter = builder.NotExists(filterSubQuery)
+	} else {
+		filter = builder.Exists(filterSubQuery)
+	}
+
+	if includeNulls && sf.AllowNullCheck {
+		filter = builder.Or(filter, builder.NotExists(sf.ToBaseSubQuery(taskAlias)))
+	}
+	return filter, nil
+}
+
 func getOrderByDBStatement(opts *taskSearchOptions) (orderby string, err error) {
 	// Since xorm does not use placeholders for order by, it is possible to expose this with sql injection if we're directly
 	// passing user input to the db.
@@ -148,6 +215,23 @@ func getOrderByDBStatement(opts *taskSearchOptions) (orderby string, err error) 
 			if db.ParadeDBAvailable() {
 				parts = append(parts, "pdb.score(tasks.id) DESC")
 			}
+			continue
+		}
+
+		if param.customFieldDefs != nil {
+			// Custom-field sorts order by the typed column of the aliased value
+			// join. Nulls sort last in both directions, followed by the task id
+			// tie-breaker appended by getRawTasksForProjects.
+			def := firstCustomFieldDef(param.customFieldDefs)
+			col := param.customFieldAlias + ".`" + customFieldValueColumn(def) + "`"
+			part := col + " " + param.orderBy.String()
+			if db.Type() == schemas.MYSQL {
+				part = col + " IS NULL, " + part
+			}
+			if db.Type() == schemas.POSTGRES || db.Type() == schemas.SQLITE {
+				part += " NULLS LAST"
+			}
+			parts = append(parts, part)
 			continue
 		}
 
@@ -209,9 +293,28 @@ func convertFiltersToDBFilterCondWithAlias(rawFilters []*taskFilter, includeNull
 			continue
 		}
 
+		if f.customFieldDefs != nil {
+			filter, err := buildCustomFieldFilterCond(f, taskAlias, includeNulls)
+			if err != nil {
+				return nil, err
+			}
+			dbFilters = append(dbFilters, filter)
+			dbFilterJoins = append(dbFilterJoins, f.join)
+			continue
+		}
+
 		subTableFilterParams, ok := subTableFilters[f.field]
 		if ok {
 			if (f.field == "assignees" || f.field == "created_by") && (f.comparator == taskFilterComparatorLike) {
+				continue
+			}
+
+			// The null operators test the existence of related rows directly:
+			// `labels is null` means no label_tasks row, `assignees is not null`
+			// means at least one. A value of 0/false/"" is a real value, not null.
+			if filter, isNull := subTableNullCond(subTableFilterParams, f.comparator, taskAlias); isNull {
+				dbFilters = append(dbFilters, filter)
+				dbFilterJoins = append(dbFilterJoins, f.join)
 				continue
 			}
 
@@ -237,43 +340,9 @@ func convertFiltersToDBFilterCondWithAlias(rawFilters []*taskFilter, includeNull
 				}
 			}
 
-			// Build the combined condition for all filters in the group
-			var combinedInnerCond builder.Cond
-			for _, gf := range group {
-				comparator := gf.comparator
-				_, isStrict := strictComparators[gf.comparator]
-				if isStrict {
-					comparator = taskFilterComparatorIn
-				}
-
-				innerFilter, err := getFilterCond(&taskFilter{
-					field:      subTableFilterParams.FilterableField,
-					value:      gf.value,
-					comparator: comparator,
-					isNumeric:  gf.isNumeric,
-				}, false)
-				if err != nil {
-					return nil, err
-				}
-
-				if combinedInnerCond == nil {
-					combinedInnerCond = innerFilter
-				} else {
-					combinedInnerCond = builder.And(combinedInnerCond, innerFilter)
-				}
-			}
-
-			filterSubQuery := subTableFilterParams.ToBaseSubQuery(taskAlias).And(combinedInnerCond)
-
-			var filter builder.Cond
-			if f.comparator == taskFilterComparatorNotEquals || f.comparator == taskFilterComparatorNotIn {
-				filter = builder.NotExists(filterSubQuery)
-			} else {
-				filter = builder.Exists(filterSubQuery)
-			}
-
-			if includeNulls && subTableFilterParams.AllowNullCheck {
-				filter = builder.Or(filter, builder.NotExists(subTableFilterParams.ToBaseSubQuery(taskAlias)))
+			filter, err := buildSubTableGroupCond(group, subTableFilterParams, taskAlias, includeNulls)
+			if err != nil {
+				return nil, err
 			}
 
 			dbFilters = append(dbFilters, filter)
@@ -506,6 +575,14 @@ func buildParentSearchCondition(search string) builder.Cond {
 //nolint:gocyclo
 func (d *dbTaskSearcher) Search(opts *taskSearchOptions) (tasks []*Task, totalCount int64, err error) {
 
+	// Resolve custom-field filters and sorts against the queried projects'
+	// definitions before any condition or order-by is built. The subtask root
+	// condition clones the filters below, so the resolved definitions must be
+	// attached first.
+	if err := resolveCustomFieldFilters(d.s, opts.projectIDs, opts.parsedFilters, opts.sortby); err != nil {
+		return nil, 0, err
+	}
+
 	joinTaskBuckets := hasBucketIDInParsedFilter(opts.parsedFilters)
 
 	var expandSubtasks = false
@@ -694,6 +771,22 @@ func (d *dbTaskSearcher) Search(opts *taskSearchOptions) (tasks []*Task, totalCo
 			query = query.Join("LEFT", "task_positions", "task_positions.task_id = tasks.id AND task_positions.project_view_id = ?", param.projectViewID)
 			break
 		}
+	}
+
+	// Definition IDs are resolved before the query, and value writes enforce
+	// task/definition project ownership, so each sort needs only one value join.
+	for _, param := range opts.sortby {
+		if param.customFieldDefs == nil {
+			continue
+		}
+		query = query.Join(
+			"LEFT",
+			"custom_field_values "+param.customFieldAlias,
+			builder.And(
+				columnEqualsCond{left: param.customFieldAlias + ".task_id", right: "tasks.id"},
+				builder.In(param.customFieldAlias+".definition_id", customFieldDefinitionIDs(param.customFieldDefs)),
+			),
+		)
 	}
 
 	if joinTaskBuckets {

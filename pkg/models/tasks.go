@@ -242,18 +242,19 @@ const (
 )
 
 type taskSearchOptions struct {
-	search             string
-	page               int
-	perPage            int
-	sortby             []*sortParam
-	parsedFilters      []*taskFilter
-	filterIncludeNulls bool
-	filter             string
-	filterTimezone     string
-	isSavedFilter      bool
-	projectIDs         []int64
-	expand             []TaskCollectionExpandable
-	projectViewID      int64
+	search                  string
+	page                    int
+	perPage                 int
+	sortby                  []*sortParam
+	parsedFilters           []*taskFilter
+	filterIncludeNulls      bool
+	filter                  string
+	filterTimezone          string
+	isSavedFilter           bool
+	projectIDs              []int64
+	expand                  []TaskCollectionExpandable
+	projectViewID           int64
+	allowCustomFieldFilters bool
 
 	// userProvidedSort distinguishes an explicit sort_by from the id/position
 	// defaults appended later, so relevance ordering only replaces the default sort.
@@ -309,11 +310,17 @@ func getFilterCond(f *taskFilter, includeNulls bool) (cond builder.Cond, err err
 		cond = builder.In(field, f.value)
 	case taskFilterComparatorNotIn:
 		cond = builder.NotIn(field, f.value)
+	case taskFilterComparatorIsNull:
+		cond = &builder.IsNull{field}
+	case taskFilterComparatorIsNotNull:
+		cond = &builder.NotNull{field}
 	case taskFilterComparatorInvalid:
 		// Nothing to do
 	}
 
-	if includeNulls {
+	// The null comparators already express the null state; OR-ing IS NULL into
+	// IS NOT NULL would match every row.
+	if includeNulls && f.comparator != taskFilterComparatorIsNull && f.comparator != taskFilterComparatorIsNotNull {
 		cond = builder.Or(cond, &builder.IsNull{field})
 		if f.isNumeric {
 			cond = builder.Or(cond, &builder.IsNull{field}, &builder.Eq{field: 0})

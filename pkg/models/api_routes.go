@@ -451,8 +451,18 @@ func GetAvailableAPIRoutesForToken(c *echo.Context) error {
 // PATCH is accepted as an alias for the stored PUT on the same path
 // (AutoPatch collapses both onto the "update" permission).
 //
-// Expansion scopes are enforced after the route match (GHSA-9rg3-v78m-26q8).
+// Expansion and custom-field filter/sort scopes are enforced after the route
+// match (GHSA-9rg3-v78m-26q8).
 func CanDoAPIRoute(c *echo.Context, token *APIToken) (can bool) {
+	can, _ = CanDoAPIRouteWithReason(c, token)
+	return can
+}
+
+// CanDoAPIRouteWithReason is CanDoAPIRoute plus the denial reason. The second
+// return value reports whether the denial is a scope violation (HTTP 403)
+// rather than a route-permission violation (HTTP 401): a valid token that lacks
+// a required scope is authenticated but forbidden, not unauthenticated.
+func CanDoAPIRouteWithReason(c *echo.Context, token *APIToken) (can bool, forbidden bool) {
 	path := c.Path()
 	if path == "" {
 		// c.Path() is empty during testing, but returns the path which
@@ -464,10 +474,13 @@ func CanDoAPIRoute(c *echo.Context, token *APIToken) (can bool) {
 	if !tokenAuthorizesRoute(token, path, method) {
 		log.Debugf("[auth] Token %d tried to use route %s %s which is not covered by its permissions %v",
 			token.ID, method, path, token.APIPermissions)
-		return false
+		return false, false
 	}
 
-	return expandScopesSatisfied(c, token, path, method)
+	if !expandScopesSatisfied(c, token, path, method) {
+		return false, true
+	}
+	return true, false
 }
 
 func tokenAuthorizesRoute(token *APIToken, path, method string) bool {
@@ -523,6 +536,17 @@ var expandScopeRoutes = map[string]bool{
 	"/api/v2/projects/:project/views/:view/buckets/tasks": true,
 }
 
+// customFieldFilterScopeRoutes are the v2 task-list routes that accept the
+// filter and sort_by query params. The custom-field filter/sort scope check
+// applies only to these: v1 task lists reject custom-field filters anyway, and
+// single-task and by-index reads take no filter or sort.
+var customFieldFilterScopeRoutes = map[string]bool{
+	"/api/v2/tasks":                                       true,
+	"/api/v2/projects/:project/tasks":                     true,
+	"/api/v2/projects/:project/views/:view/tasks":         true,
+	"/api/v2/projects/:project/views/:view/buckets/tasks": true,
+}
+
 func requiredScopeForExpand(value, path string) (group, permission string, needsScope bool) {
 	switch TaskCollectionExpandable(value) {
 	case TaskCollectionExpandComments, TaskCollectionExpandCommentCount:
@@ -549,6 +573,14 @@ func expandScopesSatisfied(c *echo.Context, token *APIToken, path, method string
 		return true
 	}
 
+	// Filtering or sorting by custom fields also requires the read_all scope:
+	// the filter result reveals whether a task's value matches a condition. Only
+	// v2 task-list routes accept filter/sort, so the check is scoped to them.
+	if customFieldFilterScopeRoutes[path] && !customFieldFilterScopeSatisfied(c, token) {
+		log.Debugf("[auth] Token %d tried to filter or sort by custom fields on %s without the custom_fields.read_all scope", token.ID, path)
+		return false
+	}
+
 	rawExpands, has := c.Request().URL.Query()["expand"]
 	if !has {
 		return true
@@ -568,6 +600,63 @@ func expandScopesSatisfied(c *echo.Context, token *APIToken, path, method string
 		}
 	}
 	return true
+}
+
+// customFieldFilterScopeSatisfied reports whether the token may filter or sort
+// by custom fields. Only filter field references and sort_by values matter;
+// order_by contains only directions. A raw substring check would wrongly reject
+// a value like `title = 'custom_fields.foo'`, so the filter is parsed and only
+// real custom_fields.<key> field references count, including inside
+// parenthesised groups.
+func customFieldFilterScopeSatisfied(c *echo.Context, token *APIToken) bool {
+	q := c.Request().URL.Query()
+
+	for _, raw := range q["sort_by"] {
+		for _, value := range strings.Split(raw, ",") {
+			if strings.HasPrefix(value, customFieldFilterNamespace) {
+				return tokenHasPermission(token, "custom_fields", "read_all")
+			}
+		}
+	}
+
+	for _, raw := range q["filter"] {
+		filters, err := getTaskFiltersFromFilterString(raw, "", true)
+		if err != nil {
+			// A malformed filter fails the request's own validation later.
+			continue
+		}
+		if filtersReferenceCustomFields(filters) {
+			return tokenHasPermission(token, "custom_fields", "read_all")
+		}
+	}
+
+	return true
+}
+
+// filtersReferenceCustomFields reports whether any filter in the tree, including
+// parenthesised groups, addresses a custom field.
+func filtersReferenceCustomFields(filters []*taskFilter) bool {
+	for _, f := range filters {
+		if nested, is := f.value.([]*taskFilter); is {
+			if filtersReferenceCustomFields(nested) {
+				return true
+			}
+			continue
+		}
+		if f.customFieldKey != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func sortsReferenceCustomFields(sortby []*sortParam) bool {
+	for _, sp := range sortby {
+		if strings.HasPrefix(sp.sortBy, customFieldFilterNamespace) {
+			return true
+		}
+	}
+	return false
 }
 
 func tokenHasPermission(token *APIToken, group, permission string) bool {

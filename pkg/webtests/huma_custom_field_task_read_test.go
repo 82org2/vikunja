@@ -111,9 +111,10 @@ func TestHumaCustomFieldTaskRead(t *testing.T) {
 	})
 
 	t.Run("collection expand requires the scope for tokens", func(t *testing.T) {
-		// Fixture token 1 has tasks.read_all but no custom_fields scope.
+		// Fixture token 1 has tasks.read_all but no custom_fields scope. A valid
+		// token that lacks a required scope is forbidden (403), not unauthenticated.
 		rec := humaRequest(t, e, http.MethodGet, "/api/v2/tasks?expand=custom_fields", "", "tk_2eef46f40ebab3304919ab2e7e39993f75f29d2e", "")
-		require.Equal(t, http.StatusUnauthorized, rec.Code, "body: %s", rec.Body.String())
+		require.Equal(t, http.StatusForbidden, rec.Code, "body: %s", rec.Body.String())
 	})
 
 	t.Run("collection expand works for a scoped token", func(t *testing.T) {

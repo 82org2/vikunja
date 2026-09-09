@@ -106,6 +106,7 @@ func savedFiltersCreate(ctx context.Context, in *struct {
 	if err := convertToHTML(ctx, &in.Body.Description); err != nil {
 		return nil, translateDomainError(err)
 	}
+	in.Body.AllowCustomFieldFilters = true
 	if err := handler.DoCreate(ctx, &in.Body, a); err != nil {
 		return nil, translateDomainError(err)
 	}
@@ -125,6 +126,7 @@ func savedFiltersUpdate(ctx context.Context, in *struct {
 	}
 	filter := &in.Body.SavedFilter
 	filter.ID = in.ID // URL wins over body
+	filter.AllowCustomFieldFilters = true
 	if err := convertToHTML(ctx, &filter.Description); err != nil {
 		return nil, translateDomainError(err)
 	}

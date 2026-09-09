@@ -63,6 +63,17 @@ func SetupTokenMiddleware() echo.MiddlewareFunc {
 		},
 		ErrorHandler: func(c *echo.Context, err error) error {
 			if err != nil {
+				// A valid API token that lacks a required scope is forbidden
+				// (403), not unauthenticated. checkAPITokenAndPutItInContext sets
+				// the flag before returning the 403 so the JWT fallback here can
+				// distinguish it from a genuinely invalid token.
+				if c.Get("api_token_forbidden") != nil {
+					return c.JSON(http.StatusForbidden, web.HTTPError{
+						HTTPCode: http.StatusForbidden,
+						Code:     models.ErrorCodeGenericForbidden,
+						Message:  "The API token does not have the required scope for this request.",
+					})
+				}
 				return c.JSON(http.StatusUnauthorized, web.HTTPError{
 					HTTPCode: http.StatusUnauthorized,
 					Code:     ErrCodeInvalidToken,
@@ -99,9 +110,17 @@ func checkAPITokenAndPutItInContext(tokenHeaderValue string, c *echo.Context, sk
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	if !skipRouteCheck && !models.CanDoAPIRoute(c, token) {
-		log.Debugf("[auth] Tried authenticating with token %d but it does not have permission to do this route", token.ID)
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	if !skipRouteCheck {
+		can, forbidden := models.CanDoAPIRouteWithReason(c, token)
+		if !can {
+			if forbidden {
+				log.Debugf("[auth] Tried authenticating with token %d but it lacks a required scope for this route", token.ID)
+				c.Set("api_token_forbidden", true)
+				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+			}
+			log.Debugf("[auth] Tried authenticating with token %d but it does not have permission to do this route", token.ID)
+			return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+		}
 	}
 
 	c.Set("api_token", token)

@@ -2183,7 +2183,7 @@ func TestTaskCollection_ExpandSubtasksFilterMatchesSubtaskOnly(t *testing.T) {
 	s2 := db.NewSession()
 	defer s2.Close()
 
-	filters, err := getTaskFiltersFromFilterString("priority = 5", "")
+	filters, err := getTaskFiltersFromFilterString("priority = 5", "", true)
 	require.NoError(t, err)
 
 	tasks, _, _, err := getRawTasksForProjects(s2, []*Project{project}, u, &taskSearchOptions{
@@ -2212,7 +2212,7 @@ func TestTaskCollection_ExpandSubtasksFilterMatchesParentOnly(t *testing.T) {
 	s2 := db.NewSession()
 	defer s2.Close()
 
-	filters, err := getTaskFiltersFromFilterString("priority = 5", "")
+	filters, err := getTaskFiltersFromFilterString("priority = 5", "", true)
 	require.NoError(t, err)
 
 	tasks, _, total, err := getRawTasksForProjects(s2, []*Project{project}, u, &taskSearchOptions{
@@ -2334,7 +2334,7 @@ func TestTaskCollection_ExpandSubtasksNullableFilterParent(t *testing.T) {
 		s2 := db.NewSession()
 		defer s2.Close()
 
-		filters, err := getTaskFiltersFromFilterString("due_date <= '2021-01-01T00:00:00'", "UTC")
+		filters, err := getTaskFiltersFromFilterString("due_date <= '2021-01-01T00:00:00'", "UTC", true)
 		require.NoError(t, err)
 
 		tasks, _, total, err := getRawTasksForProjects(s2, []*Project{project}, u, &taskSearchOptions{
@@ -2364,7 +2364,7 @@ func TestTaskCollection_ExpandSubtasksNullableFilterParent(t *testing.T) {
 		filter := "(start_date >= '2020-01-01T00:00:00' && start_date <= '2020-12-31T00:00:00') || " +
 			"(end_date >= '2020-01-01T00:00:00' && end_date <= '2020-12-31T00:00:00') || " +
 			"(due_date >= '2020-01-01T00:00:00' && due_date <= '2020-12-31T00:00:00')"
-		filters, err := getTaskFiltersFromFilterString(filter, "UTC")
+		filters, err := getTaskFiltersFromFilterString(filter, "UTC", true)
 		require.NoError(t, err)
 
 		tasks, _, total, err := getRawTasksForProjects(s2, []*Project{project}, u, &taskSearchOptions{

@@ -178,6 +178,8 @@ type ProjectView struct {
 	// If tasks are moved to the done bucket, they are marked as done. If they are marked as done individually, they are moved into the done bucket.
 	DoneBucketID int64 `xorm:"bigint INDEX null" json:"done_bucket_id" doc:"The id of the done bucket. Tasks moved here are marked done, and tasks marked done are moved here."`
 
+	AllowCustomFieldFilters bool `xorm:"-" json:"-"`
+
 	// A timestamp when this view was updated. You cannot change this value.
 	Updated time.Time `xorm:"updated not null" json:"updated" readOnly:"true" doc:"A timestamp when this view was last updated. You cannot change this value."`
 	// A timestamp when this reaction was created. You cannot change this value.
@@ -316,7 +318,7 @@ func (pv *ProjectView) Create(s *xorm.Session, a web.Auth) (err error) {
 
 func validateProjectViewFilters(p *ProjectView) (err error) {
 	if p.Filter != nil && p.Filter.Filter != "" {
-		_, err = getTaskFiltersFromFilterString(p.Filter.Filter, p.Filter.FilterTimezone)
+		_, err = getTaskFiltersFromFilterString(p.Filter.Filter, p.Filter.FilterTimezone, p.AllowCustomFieldFilters)
 		if err != nil {
 			return
 		}
@@ -328,7 +330,7 @@ func validateProjectViewFilters(p *ProjectView) (err error) {
 				continue
 			}
 			if configuration.Filter != nil && configuration.Filter.Filter != "" {
-				_, err = getTaskFiltersFromFilterString(configuration.Filter.Filter, configuration.Filter.FilterTimezone)
+				_, err = getTaskFiltersFromFilterString(configuration.Filter.Filter, configuration.Filter.FilterTimezone, p.AllowCustomFieldFilters)
 				if err != nil {
 					return
 				}
@@ -570,11 +572,6 @@ func tasksWithoutBucketInView(s *xorm.Session, pv *ProjectView) (taskIDs []int64
 // Saved filter views have no project of their own, their task set only exists
 // once the filter is evaluated.
 func filteredTasksWithoutBucketInView(s *xorm.Session, viewID int64, sf *SavedFilter) (taskIDs []int64, err error) {
-	filterCond, joinTaskBuckets, err := parseFilterCond(sf.Filters.Filter, sf.Filters.FilterTimezone, sf.Filters.FilterIncludeNulls)
-	if err != nil {
-		return nil, err
-	}
-
 	// The filter alone matches tasks across the whole instance, restrict it to
 	// what its owner can actually see.
 	projects, err := getRelevantProjectsFromCollection(s, &user.User{ID: sf.OwnerID}, &TaskCollection{})
@@ -584,6 +581,11 @@ func filteredTasksWithoutBucketInView(s *xorm.Session, viewID int64, sf *SavedFi
 	projectIDs := make([]int64, 0, len(projects))
 	for _, p := range projects {
 		projectIDs = append(projectIDs, p.ID)
+	}
+
+	filterCond, joinTaskBuckets, err := parseFilterCond(s, projectIDs, sf.Filters.Filter, sf.Filters.FilterTimezone, sf.Filters.FilterIncludeNulls)
+	if err != nil {
+		return nil, err
 	}
 
 	return taskIDsWithoutBucketInView(s, viewID, builder.And(

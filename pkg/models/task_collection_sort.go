@@ -16,11 +16,22 @@
 
 package models
 
+import "strings"
+
 type (
 	sortParam struct {
 		sortBy        string
 		orderBy       sortOrder // asc or desc
 		projectViewID int64
+
+		// customFieldDefs maps project id to the resolved definition for a
+		// custom_fields.<key> sort. Populated by resolveCustomFieldFilters; nil
+		// for regular sorts.
+		customFieldDefs map[int64]*CustomFieldDefinition
+		// customFieldAlias is the unique join alias (cfv1, cfv2, ...) assigned to
+		// a custom-field sort so multiple custom-field sorts can join the value
+		// table independently.
+		customFieldAlias string
 	}
 
 	sortOrder string
@@ -120,5 +131,12 @@ func validateTaskFieldForSorting(fieldName string) error {
 		taskPropertyIndex:
 		return nil
 	}
+
+	// Custom-field sort keys are accepted here (key syntax only); the
+	// sortable-type check happens at resolution time in the search step.
+	if strings.HasPrefix(fieldName, customFieldFilterNamespace) {
+		return validateCustomFieldKey(strings.TrimPrefix(fieldName, customFieldFilterNamespace))
+	}
+
 	return ErrInvalidTaskField{TaskField: fieldName}
 }

@@ -85,7 +85,7 @@ type TaskListQueryParams struct {
 	Filter             string   `query:"filter" doc:"Filter query to match tasks by. See https://vikunja.io/docs/filters."`
 	FilterTimezone     string   `query:"filter_timezone" doc:"Timezone used to resolve relative date filters like \"now\"."`
 	FilterIncludeNulls bool     `query:"filter_include_nulls" doc:"If true, also include tasks whose filtered field is null."`
-	SortBy             []string `query:"sort_by,explode" doc:"Fields to sort by (e.g. done, priority). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query)."`
+	SortBy             []string `query:"sort_by,explode" doc:"Fields to sort by (e.g. done, priority, or custom_fields.<machine_key> for a custom field). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query)."`
 	OrderBy            []string `query:"order_by,explode" doc:"Sort order per sort_by field, asc or desc. Repeatable; defaults to asc."`
 	Expand             []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread,custom_fields" doc:"Embed extra, more expensive data per task. Repeatable."`
 	Format             string   `query:"format" enum:"html,markdown" doc:"How rich-text fields are exchanged. See the API description."`
@@ -140,15 +140,16 @@ func (f taskListFilters) collection(projectID, viewID int64, forceFlat bool) (*m
 		return nil, translateDomainError(err)
 	}
 	tc := &models.TaskCollection{
-		ProjectID:          projectID,
-		ProjectViewID:      viewID,
-		Filter:             f.Filter,
-		FilterTimezone:     f.FilterTimezone,
-		FilterIncludeNulls: f.FilterIncludeNulls,
-		SortBy:             f.SortBy,
-		OrderBy:            f.OrderBy,
-		Expand:             expand,
-		ExpandCustomFields: expandCustomFields,
+		ProjectID:               projectID,
+		ProjectViewID:           viewID,
+		Filter:                  f.Filter,
+		FilterTimezone:          f.FilterTimezone,
+		FilterIncludeNulls:      f.FilterIncludeNulls,
+		SortBy:                  f.SortBy,
+		OrderBy:                 f.OrderBy,
+		Expand:                  expand,
+		ExpandCustomFields:      expandCustomFields,
+		AllowCustomFieldFilters: true,
 	}
 	if forceFlat {
 		tc.SetForceFlatTasks()
@@ -210,6 +211,14 @@ func projectViewTasksList(ctx context.Context, in *taskListViewInput) (*taskList
 	return readFlatTasks(ctx, in.filters(), in.Page, in.PerPage, in.ProjectID, in.ViewID)
 }
 
+// customFieldFilterScopeSatisfied reports whether the request's auth may filter
+// or sort by custom fields: user sessions and link shares always may, API tokens
+// only with the custom_fields.read_all scope.
+func customFieldFilterScopeSatisfied(ctx context.Context) bool {
+	ec := echoContextFromCtx(ctx)
+	return ec == nil || (*ec).Get("api_token") == nil || models.TokenHasPermission(ec, "custom_fields", "read_all")
+}
+
 // readFlatTasks runs DoReadAll for a flat-task endpoint and unwraps the result.
 // The model authorizes (project/view CanRead) inside ReadAll, so there's no
 // Can* call here.
@@ -222,6 +231,7 @@ func readFlatTasks(ctx context.Context, f taskListFilters, page, perPage int, pr
 	if err != nil {
 		return nil, err
 	}
+	tc.CustomFieldFilterScopeSatisfied = customFieldFilterScopeSatisfied(ctx)
 	result, _, total, err := handler.DoReadAll(ctx, tc, a, f.Q, page, perPage)
 	if err != nil {
 		return nil, translateDomainError(err)
@@ -248,6 +258,7 @@ func projectViewBucketsTasksList(ctx context.Context, in *taskListViewInput) (*b
 	if err != nil {
 		return nil, err
 	}
+	tc.CustomFieldFilterScopeSatisfied = customFieldFilterScopeSatisfied(ctx)
 	result, _, total, err := handler.DoReadAll(ctx, tc, a, f.Q, in.Page, in.PerPage)
 	if err != nil {
 		return nil, translateDomainError(err)

@@ -141,6 +141,7 @@ func projectViewsCreate(ctx context.Context, in *struct {
 		return nil, err
 	}
 	in.Body.ProjectID = in.ProjectID // URL wins over body
+	in.Body.AllowCustomFieldFilters = true
 	if err := handler.DoCreate(ctx, &in.Body, a); err != nil {
 		return nil, translateDomainError(err)
 	}
@@ -160,6 +161,7 @@ func projectViewsUpdate(ctx context.Context, in *struct {
 	view := &in.Body.ProjectView
 	view.ID = in.ID               // URL wins over body
 	view.ProjectID = in.ProjectID // parent from the path scopes the update
+	view.AllowCustomFieldFilters = true
 	if err := handler.DoUpdate(ctx, view, a); err != nil {
 		return nil, translateDomainError(err)
 	}

@@ -28,6 +28,7 @@ import (
 	"code.vikunja.io/api/pkg/user"
 
 	"github.com/jaswdr/faker/v2"
+	"xorm.io/builder"
 )
 
 func initBenchmarkConfig() {
@@ -92,6 +93,12 @@ func createBenchmarkData(b *testing.B, needle string) *user.User {
 		}
 	}
 
+	// The benchmark session holds a transaction; without a commit the projects
+	// and tasks are invisible to the query sessions below.
+	if err := s.Commit(); err != nil {
+		b.Fatalf("commit benchmark data: %v", err)
+	}
+
 	return u
 }
 
@@ -148,4 +155,148 @@ func BenchmarkTaskSearch(b *testing.B) {
 			b.Fatalf("search error: %v", err)
 		}
 	}
+}
+
+// createCustomFieldBenchmarkData adds a number definition to the first project
+// and a value row for every other task, so filter and sort queries exercise the
+// custom_field_values join and subquery at scale.
+func createCustomFieldBenchmarkData(b *testing.B, projectID int64) {
+	s := db.NewSession()
+	defer s.Close()
+
+	def := &CustomFieldDefinition{
+		ProjectID:  projectID,
+		MachineKey: "benchmark_score",
+		Title:      "Benchmark Score",
+		FieldType:  CustomFieldTypeNumber,
+	}
+	if _, err := s.Insert(def); err != nil {
+		b.Fatalf("insert definition: %v", err)
+	}
+
+	tasks := []*Task{}
+	if err := s.Where(builder.Eq{"project_id": projectID}).Find(&tasks); err != nil {
+		b.Fatalf("load tasks: %v", err)
+	}
+	for i, task := range tasks {
+		if i%2 != 0 {
+			continue
+		}
+		value := int64(i % 1000)
+		if _, err := s.Insert(&TaskCustomFieldValue{TaskID: task.ID, DefinitionID: def.ID, ValueNumber: &value}); err != nil {
+			b.Fatalf("insert value: %v", err)
+		}
+	}
+	if err := s.Commit(); err != nil {
+		b.Fatalf("commit benchmark data: %v", err)
+	}
+}
+
+func BenchmarkCustomFieldFilter(b *testing.B) {
+	initBenchmarkConfig()
+	SetupTests()
+	err := db.LoadFixtures()
+	if err != nil {
+		b.Fatalf("load fixtures: %v", err)
+	}
+
+	auth := createBenchmarkData(b, "llama")
+
+	s := db.NewSession()
+	projects, _, _, err := getRawProjectsForUser(
+		s,
+		&projectOptions{
+			user: auth,
+			page: -1,
+		},
+	)
+	s.Close()
+	if err != nil {
+		b.Fatalf("get projects: %v", err)
+	}
+
+	// Host the definition and values in a benchmark project (created by
+	// createBenchmarkData with 2500 tasks), not a fixture project, so the
+	// filter and sort exercise the value table at scale. The benchmark projects
+	// are titled "Project 0".."Project 9"; the fixture projects use longer
+	// titles like "Project 36 for Caldav tests".
+	s = db.NewSession()
+	benchmarkProjects := []*Project{}
+	if err := s.Where(&builder.Like{"title", "Project _"}).Find(&benchmarkProjects); err != nil {
+		b.Fatalf("find benchmark projects: %v", err)
+	}
+	s.Close()
+	if len(benchmarkProjects) == 0 {
+		b.Fatalf("no benchmark projects found")
+	}
+	createCustomFieldBenchmarkData(b, benchmarkProjects[0].ID)
+
+	// Re-resolve the project list so the definition is visible.
+	s = db.NewSession()
+	projects, _, _, err = getRawProjectsForUser(
+		s,
+		&projectOptions{
+			user: auth,
+			page: -1,
+		},
+	)
+	s.Close()
+	if err != nil {
+		b.Fatalf("get projects: %v", err)
+	}
+
+	filterOpts := &taskSearchOptions{
+		page:           1,
+		perPage:        50,
+		filter:         "custom_fields.benchmark_score > 500",
+		filterTimezone: "UTC",
+	}
+	// Resolution mutates the parsed filters (casts values, attaches definitions),
+	// so keep a pristine copy and clone it per iteration.
+	pristineFilters, err := getTaskFiltersFromFilterString(filterOpts.filter, filterOpts.filterTimezone, true)
+	if err != nil {
+		b.Fatalf("parse filter: %v", err)
+	}
+	sortOpts := &taskSearchOptions{
+		page:    1,
+		perPage: 50,
+		sortby: []*sortParam{{
+			sortBy:  "custom_fields.benchmark_score",
+			orderBy: orderDescending,
+		}},
+	}
+
+	b.Log("Setup done, starting benchmark...")
+
+	b.Run("filter", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			s := db.NewSession()
+			opts := *filterOpts
+			opts.parsedFilters = cloneTaskFilters(pristineFilters)
+			resultSlice, _, _, err := getRawTasksForProjects(s, projects, auth, &opts)
+			if len(resultSlice) == 0 {
+				b.Fatalf("no results found for custom-field filter")
+			}
+			s.Close()
+			if err != nil {
+				b.Fatalf("filter error: %v", err)
+			}
+		}
+	})
+
+	b.Run("sort", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			s := db.NewSession()
+			resultSlice, _, _, err := getRawTasksForProjects(s, projects, auth, sortOpts)
+			if len(resultSlice) == 0 {
+				b.Fatalf("no results found for custom-field sort")
+			}
+			s.Close()
+			if err != nil {
+				b.Fatalf("sort error: %v", err)
+			}
+		}
+	})
 }

@@ -29,7 +29,7 @@ import (
 
 func TestParseFilter(t *testing.T) {
 	t.Run("boolean filter true", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("done = true", "UTC")
+		result, err := getTaskFiltersFromFilterString("done = true", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -38,7 +38,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, true, result[0].value)
 	})
 	t.Run("boolean filter false", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("done = false", "UTC")
+		result, err := getTaskFiltersFromFilterString("done = false", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -47,7 +47,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, false, result[0].value)
 	})
 	t.Run("numeric one", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("project_id = 1", "UTC")
+		result, err := getTaskFiltersFromFilterString("project_id = 1", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -55,7 +55,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(1), result[0].value)
 	})
 	t.Run("numeric long", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("project_id = 4234", "UTC")
+		result, err := getTaskFiltersFromFilterString("project_id = 4234", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -63,7 +63,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(4234), result[0].value)
 	})
 	t.Run("in", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("project_id in 1,2,3", "UTC")
+		result, err := getTaskFiltersFromFilterString("project_id in 1,2,3", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -75,7 +75,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(3), result[0].value.([]interface{})[2])
 	})
 	t.Run("not in", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("project_id not in 1,2,3", "UTC")
+		result, err := getTaskFiltersFromFilterString("project_id not in 1,2,3", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -87,7 +87,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(3), result[0].value.([]interface{})[2])
 	})
 	t.Run("use project for project_id", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("project in 1,2,3", "UTC")
+		result, err := getTaskFiltersFromFilterString("project in 1,2,3", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -98,7 +98,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(3), result[0].value.([]interface{})[2])
 	})
 	t.Run("project in with spaces", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("project in 1, 2, 3", "UTC")
+		result, err := getTaskFiltersFromFilterString("project in 1, 2, 3", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -109,7 +109,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(3), result[0].value.([]interface{})[2])
 	})
 	t.Run("date math strings", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("due_date < now+30d", "UTC")
+		result, err := getTaskFiltersFromFilterString("due_date < now+30d", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -118,7 +118,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, in30Days.Unix(), result[0].value.(time.Time).Unix())
 	})
 	t.Run("date math strings with quotes", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("due_date < 'now+30d'", "UTC")
+		result, err := getTaskFiltersFromFilterString("due_date < 'now+30d'", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -127,7 +127,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, in30Days.Unix(), result[0].value.(time.Time).Unix())
 	})
 	t.Run("string values with single quotes", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("title = 'foo bar'", "UTC")
+		result, err := getTaskFiltersFromFilterString("title = 'foo bar'", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -135,7 +135,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "foo bar", result[0].value)
 	})
 	t.Run("string values with double quotes", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString(`title = "foo bar"`, "UTC")
+		result, err := getTaskFiltersFromFilterString(`title = "foo bar"`, "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -143,7 +143,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "foo bar", result[0].value)
 	})
 	t.Run("string values without quotes", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("title = foo bar", "UTC")
+		result, err := getTaskFiltersFromFilterString("title = foo bar", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -151,7 +151,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "foo bar", result[0].value)
 	})
 	t.Run("string values with single quote in them", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("title = foo's bar", "UTC")
+		result, err := getTaskFiltersFromFilterString("title = foo's bar", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -159,7 +159,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "foo's bar", result[0].value)
 	})
 	t.Run("string values with souble quote in them", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString(`title = foo"s bar`, "UTC")
+		result, err := getTaskFiltersFromFilterString(`title = foo"s bar`, "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -167,7 +167,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, `foo"s bar`, result[0].value)
 	})
 	t.Run("like query", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("title like foo bar", "UTC")
+		result, err := getTaskFiltersFromFilterString("title like foo bar", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -175,12 +175,12 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "foo bar", result[0].value)
 	})
 	t.Run("invalid field", func(t *testing.T) {
-		_, err := getTaskFiltersFromFilterString("invalid = foo", "UTC")
+		_, err := getTaskFiltersFromFilterString("invalid = foo", "UTC", true)
 
 		require.Error(t, err)
 	})
 	t.Run("multiple filters with AND", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("done = false && priority > 3", "UTC")
+		result, err := getTaskFiltersFromFilterString("done = false && priority > 3", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 2)
@@ -191,7 +191,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(3), result[1].value)
 	})
 	t.Run("multiple filters with OR", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("due_date < now || percent_done = 100", "UTC")
+		result, err := getTaskFiltersFromFilterString("due_date < now || percent_done = 100", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 2)
@@ -201,7 +201,7 @@ func TestParseFilter(t *testing.T) {
 		assert.InEpsilon(t, float64(100), result[1].value, 0)
 	})
 	t.Run("complex query with parentheses", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("(priority >= 4 && due_date < now+7d) || (done = false && assignees in 'John,Jane')", "UTC")
+		result, err := getTaskFiltersFromFilterString("(priority >= 4 && due_date < now+7d) || (done = false && assignees in 'John,Jane')", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 2)
@@ -221,7 +221,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, taskFilterComparatorIn, secondSet[1].comparator)
 	})
 	t.Run("not equals comparator", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("priority != 3", "UTC")
+		result, err := getTaskFiltersFromFilterString("priority != 3", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -230,7 +230,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(3), result[0].value)
 	})
 	t.Run("created by resolves to usernames, not an int64 id", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("created_by in 'user1,user6'", "UTC")
+		result, err := getTaskFiltersFromFilterString("created_by in 'user1,user6'", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -239,7 +239,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, []string{"user1", "user6"}, result[0].value)
 	})
 	t.Run("created by usernames are trimmed of surrounding whitespace", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("created_by in 'user1, user6'", "UTC")
+		result, err := getTaskFiltersFromFilterString("created_by in 'user1, user6'", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -248,7 +248,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, []string{"user1", "user6"}, result[0].value)
 	})
 	t.Run("created by usernames drop empty entries from stray commas", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("created_by in 'user1, , user6,'", "UTC")
+		result, err := getTaskFiltersFromFilterString("created_by in 'user1, , user6,'", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -257,7 +257,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, []string{"user1", "user6"}, result[0].value)
 	})
 	t.Run("less than or equal comparator", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("percent_done <= 50", "UTC")
+		result, err := getTaskFiltersFromFilterString("percent_done <= 50", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -266,7 +266,7 @@ func TestParseFilter(t *testing.T) {
 		assert.InEpsilon(t, float64(50), result[0].value, 0)
 	})
 	t.Run("date field with exact date", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("start_date = 2023-06-15", "UTC")
+		result, err := getTaskFiltersFromFilterString("start_date = 2023-06-15", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -278,7 +278,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, expectedDate.Format(time.RFC3339), resultTime.Format(time.RFC3339))
 	})
 	t.Run("date field with non-zero-padded date", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("start_date = 2023-6-5", "UTC")
+		result, err := getTaskFiltersFromFilterString("start_date = 2023-6-5", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -290,7 +290,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, expectedDate.Format(time.RFC3339), resultTime.Format(time.RFC3339))
 	})
 	t.Run("date field with non-zero-padded day", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("due_date = 2022-11-1", "UTC")
+		result, err := getTaskFiltersFromFilterString("due_date = 2022-11-1", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -301,7 +301,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, expectedDate.Format(time.RFC3339), resultTime.Format(time.RFC3339))
 	})
 	t.Run("in query with multiple values", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("priority in 1,3,5", "UTC")
+		result, err := getTaskFiltersFromFilterString("priority in 1,3,5", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -313,7 +313,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(5), result[0].value.([]interface{})[2])
 	})
 	t.Run("done_at field with relative time", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("done_at > now-7d", "UTC")
+		result, err := getTaskFiltersFromFilterString("done_at > now-7d", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -323,7 +323,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, sevenDaysAgo.Unix(), result[0].value.(time.Time).Unix())
 	})
 	t.Run("date filter with 0000-01-01", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("due_date > 0000-01-01", "UTC")
+		result, err := getTaskFiltersFromFilterString("due_date > 0000-01-01", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -331,7 +331,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, 1, date.Year())
 	})
 	t.Run("project with parentheses", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("( project = 1 )", "UTC")
+		result, err := getTaskFiltersFromFilterString("( project = 1 )", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -343,7 +343,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(1), firstSet[0].value)
 	})
 	t.Run("project with OR in parentheses", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("( done = false || project = 1 )", "UTC")
+		result, err := getTaskFiltersFromFilterString("( done = false || project = 1 )", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -358,7 +358,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, int64(1), firstSet[1].value)
 	})
 	t.Run("like query with in inside a quoted value", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("title like 'stuff in progress'", "UTC")
+		result, err := getTaskFiltersFromFilterString("title like 'stuff in progress'", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -367,7 +367,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "stuff in progress", result[0].value)
 	})
 	t.Run("like query with in inside a double quoted value", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString(`title like "stuff in progress"`, "UTC")
+		result, err := getTaskFiltersFromFilterString(`title like "stuff in progress"`, "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -376,7 +376,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "stuff in progress", result[0].value)
 	})
 	t.Run("like query with escaped quote and in inside the value", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString(`title like 'it\'s in progress'`, "UTC")
+		result, err := getTaskFiltersFromFilterString(`title like 'it\'s in progress'`, "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 1)
@@ -385,7 +385,7 @@ func TestParseFilter(t *testing.T) {
 		assert.Equal(t, "it's in progress", result[0].value)
 	})
 	t.Run("in outside quotes next to in inside a quoted value", func(t *testing.T) {
-		result, err := getTaskFiltersFromFilterString("title like 'stuff in progress' && project in 1,2", "UTC")
+		result, err := getTaskFiltersFromFilterString("title like 'stuff in progress' && project in 1,2", "UTC", true)
 
 		require.NoError(t, err)
 		require.Len(t, result, 2)
@@ -402,7 +402,7 @@ func TestParseFilter(t *testing.T) {
 		// "no" triggers a panic in the datemath lexer because it starts
 		// recognizing "now" but hits EOF after "no". The safeDatemathParse
 		// wrapper must recover from this panic and return an error instead.
-		_, err := getTaskFiltersFromFilterString("due_date = no", "UTC")
+		_, err := getTaskFiltersFromFilterString("due_date = no", "UTC", true)
 		require.Error(t, err)
 	})
 }
@@ -471,7 +471,7 @@ func TestDateFilterTimezone(t *testing.T) {
 
 	for _, expr := range []string{"now/d", "now/d+1d", "now+1d/d"} {
 		t.Run(expr, func(t *testing.T) {
-			filters, err := getTaskFiltersFromFilterString("due_date < "+expr, "America/Los_Angeles")
+			filters, err := getTaskFiltersFromFilterString("due_date < "+expr, "America/Los_Angeles", true)
 			require.NoError(t, err)
 			require.Len(t, filters, 1)
 
@@ -490,7 +490,7 @@ func TestDateFilterTimezone(t *testing.T) {
 
 	// 2026-07-15 00:00 PDT (UTC-7) = 07:00 UTC
 	t.Run("absolute date", func(t *testing.T) {
-		filters, err := getTaskFiltersFromFilterString("due_date < 2026-07-15", "America/Los_Angeles")
+		filters, err := getTaskFiltersFromFilterString("due_date < 2026-07-15", "America/Los_Angeles", true)
 		require.NoError(t, err)
 		require.Len(t, filters, 1)
 
@@ -515,7 +515,7 @@ func TestZeroDateFilterBoundary(t *testing.T) {
 		"due_date > 0001-01-01T00:00:00Z",
 	} {
 		t.Run(filter, func(t *testing.T) {
-			filters, err := getTaskFiltersFromFilterString(filter, "Europe/Berlin")
+			filters, err := getTaskFiltersFromFilterString(filter, "Europe/Berlin", true)
 			require.NoError(t, err)
 			require.Len(t, filters, 1)
 

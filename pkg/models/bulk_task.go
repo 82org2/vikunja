@@ -17,6 +17,8 @@
 package models
 
 import (
+	"slices"
+
 	"code.vikunja.io/api/pkg/web"
 
 	"xorm.io/xorm"
@@ -56,8 +58,10 @@ func (bt *BulkTask) CanUpdate(s *xorm.Session, a web.Auth) (bool, error) {
 		}
 	}
 
-	// if tasks are moved to another project, check destination permission
-	if bt.Values != nil && bt.Values.ProjectID != 0 {
+	// if tasks are moved to another project, check destination permission. An
+	// empty field mask applies every field; otherwise only a named project_id
+	// moves the tasks, so a masked-out project_id must not be permission-checked.
+	if bt.Values != nil && bt.Values.ProjectID != 0 && (len(bt.Fields) == 0 || slices.Contains(bt.Fields, "project_id")) {
 		p := &Project{ID: bt.Values.ProjectID}
 		can, err := p.CanWrite(s, a)
 		if err != nil || !can {

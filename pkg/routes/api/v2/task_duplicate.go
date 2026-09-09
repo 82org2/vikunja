@@ -37,7 +37,7 @@ func RegisterTaskDuplicateRoutes(api huma.API) {
 	Register(api, huma.Operation{
 		OperationID: "tasks-duplicate",
 		Summary:     "Duplicate a task",
-		Description: "Copies a task — including its labels, assignees, attachments and reminders — into the same project, and records a \"copied from\" relation back to the original. The authenticated user needs read access to the source task and write access to its project. Returns the newly created duplicate.",
+		Description: "Copies a task — including its labels, assignees, attachments, reminders and custom-field values — into the same project by default, or into another project when a project_id is given. Cross-project duplication requires a compatible custom-field destination and write access on the destination project, and records a \"copied from\" relation back to the original. The authenticated user needs read access to the source task and write access to the destination project. Returns the newly created duplicate.",
 		Method:      http.MethodPost,
 		Path:        "/tasks/{projecttask}/duplicate",
 		Tags:        tags,
@@ -48,12 +48,20 @@ func init() { AddRouteRegistrar(RegisterTaskDuplicateRoutes) }
 
 func tasksDuplicate(ctx context.Context, in *struct {
 	TaskID int64 `path:"projecttask" doc:"The numeric id of the task to duplicate."`
+	// Pointer so the body is optional: duplicating into the same project needs
+	// no request body at all.
+	Body *struct {
+		ProjectID int64 `json:"project_id,omitempty" doc:"The project to duplicate the task into. Defaults to the original task's project."`
+	}
 }) (*singleBody[models.TaskDuplicate], error) {
 	a, err := authFromCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	td := &models.TaskDuplicate{TaskID: in.TaskID}
+	if in.Body != nil {
+		td.ProjectID = in.Body.ProjectID
+	}
 	if err := handler.DoCreate(ctx, td, a); err != nil {
 		return nil, translateDomainError(err)
 	}

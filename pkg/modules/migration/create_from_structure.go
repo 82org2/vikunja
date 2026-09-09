@@ -626,6 +626,22 @@ func createProjectWithEverything(s *xorm.Session, project *models.ProjectWithTas
 		}
 	}
 
+	// Import the custom-field definitions, options, and task values. Definitions
+	// are created after the tasks, so task creation materializes no defaults and
+	// the imported tasks carry exactly the exported values. Old exports without
+	// custom-field keys skip this block.
+	if len(project.CustomFieldDefinitions) > 0 || len(project.CustomFieldOptions) > 0 {
+		taskValues := make(map[int64][]*models.CustomFieldTaskValueExport)
+		for _, t := range tasks {
+			if len(t.CustomFieldValues) > 0 {
+				taskValues[t.ID] = t.CustomFieldValues
+			}
+		}
+		if err := models.ImportCustomFieldsForProject(s, project.ID, project.CustomFieldDefinitions, project.CustomFieldOptions, taskValues); err != nil {
+			return err
+		}
+	}
+
 	for doneAt, taskIDs := range taskIDsByDoneAt {
 		_, err = s.In("id", taskIDs).Cols("done", "done_at").Update(&models.Task{Done: true, DoneAt: doneAt})
 		if err != nil {

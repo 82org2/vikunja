@@ -233,6 +233,12 @@ func exportProjectsAndTasks(s *xorm.Session, u *user.User, wr *zip.Writer) (task
 		taskIDs = append(taskIDs, t.ID)
 	}
 
+	// Attach the custom-field definitions, options, and task values so the
+	// export round-trips them by machine key.
+	if err = addCustomFieldsToExport(s, projects, projectIDs, taskIDs); err != nil {
+		return taskIDs, err
+	}
+
 	comments := []*TaskComment{}
 	err = s.
 		Join("LEFT", "tasks", "tasks.id = task_comments.task_id").

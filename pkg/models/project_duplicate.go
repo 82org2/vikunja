@@ -101,7 +101,14 @@ func (pd *ProjectDuplicate) Create(s *xorm.Session, doer web.Auth) (err error) {
 
 	log.Debugf("Duplicated project %d into new project %d", pd.ProjectID, pd.Project.ID)
 
-	newTaskIDs, err := duplicateTasks(s, doer, pd)
+	// Clone the custom-field definitions and options first so the task
+	// duplication below can remap values through the old->new id maps.
+	defRemap, optionRemap, err := duplicateCustomFieldDefinitions(s, pd.ProjectID, pd.Project.ID)
+	if err != nil {
+		return
+	}
+
+	newTaskIDs, err := duplicateTasks(s, doer, pd, defRemap, optionRemap)
 	if err != nil {
 		return
 	}
@@ -171,6 +178,14 @@ func (pd *ProjectDuplicate) Create(s *xorm.Session, doer web.Auth) (err error) {
 		}
 
 		log.Debugf("Duplicated all link shares from project %d into %d", pd.ProjectID, pd.Project.ID)
+	}
+
+	// The destination's visibility is final only after shares are copied, so
+	// validate the copied user-type values and defaults now: a user value that
+	// references a user not visible in the destination would violate the stored
+	// invariant, and silently dropping it would lose data.
+	if err = validateProjectCustomFieldUserValues(s, pd.Project.ID); err != nil {
+		return
 	}
 
 	err = pd.Project.ReadOne(s, doer)
@@ -343,7 +358,7 @@ func duplicateProjectBackground(s *xorm.Session, pd *ProjectDuplicate, doer web.
 	return nil
 }
 
-func duplicateTasks(s *xorm.Session, doer web.Auth, ld *ProjectDuplicate) (newTaskIDs map[int64]int64, err error) {
+func duplicateTasks(s *xorm.Session, doer web.Auth, ld *ProjectDuplicate, defRemap, optionRemap map[int64]int64) (newTaskIDs map[int64]int64, err error) {
 	// Get all tasks + all task details
 	tasks, _, _, err := getTasksForProjects(s, []*Project{{ID: ld.ProjectID}}, doer, &taskSearchOptions{}, nil)
 	if err != nil {
@@ -366,6 +381,12 @@ func duplicateTasks(s *xorm.Session, doer web.Auth, ld *ProjectDuplicate) (newTa
 		t.UID = ""
 		err = createTask(s, t, doer, false, false)
 		if err != nil {
+			return nil, err
+		}
+		// Copy the task's custom-field values remapped onto the cloned
+		// definitions and options. The copy clears any defaults materialized by
+		// createTask so unset fields stay unset.
+		if err = copyTaskCustomFieldValues(s, oldID, t.ID, defRemap, optionRemap); err != nil {
 			return nil, err
 		}
 		newTaskIDs[oldID] = t.ID

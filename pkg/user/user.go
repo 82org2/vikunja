@@ -268,6 +268,17 @@ func GetUserByUsername(s *xorm.Session, username string) (user *User, err error)
 	return getUser(s, &User{Username: username}, false)
 }
 
+// GetUserByEmail gets a user from its email address. Used by the custom-field
+// import to resolve user values by a stable identity instead of a foreign
+// numeric id.
+func GetUserByEmail(s *xorm.Session, email string) (user *User, err error) {
+	if email == "" {
+		return &User{}, ErrUserDoesNotExist{}
+	}
+
+	return getUser(s, &User{Email: email}, true)
+}
+
 // GetUsersByUsername returns a slice of users with the provided usernames
 func GetUsersByUsername(s *xorm.Session, usernames []string, withEmails bool) (users map[int64]*User, err error) {
 	if len(usernames) == 0 {

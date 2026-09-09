@@ -329,18 +329,21 @@ func convertFieldValue(fieldName string, value interface{}, isFloat bool) (inter
 
 func restoreTableData(tables map[string]*zip.File) error {
 	jsonFields := map[string][]string{
-		"api_tokens":    {"permissions"},
-		"notifications": {"notification"},
-		"project_views": {"filter", "bucket_configuration"},
-		"saved_filters": {"filters"},
-		"users":         {"frontend_settings"},
+		"api_tokens":               {"permissions"},
+		"custom_field_definitions": {"configuration", "default_value"},
+		"notifications":            {"notification"},
+		"project_views":            {"filter", "bucket_configuration"},
+		"saved_filters":            {"filters"},
+		"users":                    {"frontend_settings"},
 	}
 
 	floatFields := map[string][]string{
-		"buckets":        {"position"},
-		"project_views":  {"position"},
-		"projects":       {"position"},
-		"task_positions": {"position"},
+		"buckets":                  {"position"},
+		"custom_field_definitions": {"position"},
+		"custom_field_options":     {"position"},
+		"project_views":            {"position"},
+		"projects":                 {"position"},
+		"task_positions":           {"position"},
 	}
 
 	// Restore all db data

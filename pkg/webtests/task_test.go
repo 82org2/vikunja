@@ -334,7 +334,9 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("Move to other project", func(t *testing.T) {
 			t.Run("normal", func(t *testing.T) {
-				rec, err := testHandler.testUpdateWithUser(nil, map[string]string{"projecttask": "1"}, `{"project_id":7}`)
+				// Task 4 has no custom-field values, so the move is not subject
+				// to the custom-field destination preflight.
+				rec, err := testHandler.testUpdateWithUser(nil, map[string]string{"projecttask": "4"}, `{"project_id":7}`)
 				require.NoError(t, err)
 				assert.Contains(t, rec.Body.String(), `"project_id":7`)
 				assert.NotContains(t, rec.Body.String(), `"project_id":1`)

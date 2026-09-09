@@ -225,6 +225,13 @@ func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefiniti
 		return ErrInvalidCustomFieldValue{Message: "A custom field definition is required."}
 	}
 
+	// Lock the task row first, then the definition row: value writes and task
+	// moves both take the task lock before any definition lock, so the order is
+	// consistent and no AB-BA deadlock is possible. The task lock also
+	// serializes concurrent writes to any custom field on the task.
+	if err := lockTaskRow(s, taskID); err != nil {
+		return err
+	}
 	// Lock the definition row so a concurrent permanent-delete or definition
 	// update cannot interleave: whichever side holds the lock first wins, and the
 	// loser sees the definition gone (or the new value included in the deletion
@@ -332,6 +339,10 @@ func isStaleCustomFieldDefaultError(err error, fieldType CustomFieldType) bool {
 // UnsetCustomFieldValue removes the value row and its memberships. Unsetting a
 // field that has no row is a no-op, matching the idempotent unset contract.
 func UnsetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) error {
+	// Take the task row lock first, matching SetCustomFieldValue's lock order.
+	if err := lockTaskRow(s, taskID); err != nil {
+		return err
+	}
 	row, err := GetCustomFieldValue(s, taskID, definitionID)
 	if err != nil {
 		if IsErrCustomFieldValueDoesNotExist(err) {
@@ -510,4 +521,272 @@ func (v *TaskCustomFieldValue) upsert(s *xorm.Session) error {
 		Cols("value_short_text", "value_long_text", "value_number", "value_boolean", "value_date", "value_datetime", "value_url", "value_user_id", "value_single_option_id", "updated").
 		Update(v)
 	return err
+}
+
+// --- lifecycle cleanup and duplication ---
+
+// deleteTaskCustomFieldValues removes the value rows and memberships of a task
+// in bounded batches. Called by hardDeleteTask so a purged task leaves no
+// custom-field rows behind.
+func deleteTaskCustomFieldValues(s *xorm.Session, taskID int64) error {
+	const batchSize = 500
+	for {
+		rows := []*TaskCustomFieldValue{}
+		if err := s.Where("task_id = ?", taskID).Limit(batchSize).Cols("id").Find(&rows); err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		ids := make([]int64, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		if _, err := s.In("value_id", ids).Delete(&CustomFieldValueOption{}); err != nil {
+			return err
+		}
+		if _, err := s.In("id", ids).Delete(&TaskCustomFieldValue{}); err != nil {
+			return err
+		}
+	}
+}
+
+// unsetCustomFieldUserValues deletes every user-type value row referencing the
+// deleted user and advances each affected task's updated timestamp in bounded
+// batches, so task ETags stay consistent. User-type values have no memberships,
+// so a plain row delete suffices; the referenced user must not be left as a
+// dangling identity.
+func unsetCustomFieldUserValues(s *xorm.Session, userID int64) error {
+	const batchSize = 500
+	taskIDs := make([]int64, 0)
+	seen := map[int64]struct{}{}
+	for {
+		rows := []*TaskCustomFieldValue{}
+		if err := s.Where("value_user_id = ?", userID).Limit(batchSize).Cols("id", "task_id").Find(&rows); err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		ids := make([]int64, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+			if _, ok := seen[row.TaskID]; ok {
+				continue
+			}
+			seen[row.TaskID] = struct{}{}
+			taskIDs = append(taskIDs, row.TaskID)
+		}
+		if _, err := s.In("id", ids).Delete(&TaskCustomFieldValue{}); err != nil {
+			return err
+		}
+	}
+	for chunk := range slices.Chunk(taskIDs, batchSize) {
+		if _, err := s.In("id", chunk).Cols("updated").Update(&Task{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyTaskCustomFieldValues copies every value row and multi-select membership
+// of the source task onto the destination task, remapping definition and
+// option ids through the given maps (nil maps mean identity). It first clears
+// all destination values so defaults materialized by task creation are removed
+// and unset fields stay unset: the copy is exact. It bypasses
+// SetCustomFieldValue so archived definitions are copied and no per-value
+// validation or timestamp churn happens; the source values were already valid
+// against their definitions.
+func copyTaskCustomFieldValues(s *xorm.Session, sourceTaskID, destTaskID int64, defRemap, optionRemap map[int64]int64) error {
+	if err := deleteTaskCustomFieldValues(s, destTaskID); err != nil {
+		return err
+	}
+
+	rows := []*TaskCustomFieldValue{}
+	if err := s.Where("task_id = ?", sourceTaskID).Find(&rows); err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	// Load the source definitions to detect multi-select rows and fail loudly
+	// on corrupt data.
+	defIDs := make([]int64, 0, len(rows))
+	seen := map[int64]struct{}{}
+	for _, row := range rows {
+		if _, ok := seen[row.DefinitionID]; ok {
+			continue
+		}
+		seen[row.DefinitionID] = struct{}{}
+		defIDs = append(defIDs, row.DefinitionID)
+	}
+	defs, err := getCustomFieldDefinitionsByIDs(s, defIDs)
+	if err != nil {
+		return err
+	}
+	defMap := make(map[int64]*CustomFieldDefinition, len(defs))
+	for _, def := range defs {
+		defMap[def.ID] = def
+	}
+
+	// Load every multi-select value's memberships in one batched pair of
+	// queries instead of one query per value.
+	multiSelectValueIDs := make([]int64, 0, len(rows))
+	valueDefinitions := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		def, ok := defMap[row.DefinitionID]
+		if !ok {
+			return missingCustomFieldDefinitionError(row)
+		}
+		if def.FieldType == CustomFieldTypeMultiSelect {
+			multiSelectValueIDs = append(multiSelectValueIDs, row.ID)
+			valueDefinitions[row.ID] = row.DefinitionID
+		}
+	}
+	optionIDsByValue, err := getOptionIDsForValues(s, multiSelectValueIDs, valueDefinitions)
+	if err != nil {
+		return err
+	}
+
+	// Load the destination definitions so number values can be rescaled to the
+	// destination precision (a no-op when the precision is unchanged).
+	destDefMap, err := destinationDefMapForCopy(s, rows, defRemap)
+	if err != nil {
+		return err
+	}
+
+	for _, row := range rows {
+		def, ok := defMap[row.DefinitionID]
+		if !ok {
+			return missingCustomFieldDefinitionError(row)
+		}
+		newDefID, err := remapDefinitionID(row.DefinitionID, defRemap)
+		if err != nil {
+			return err
+		}
+
+		// Zero the identity and timestamps so XORM fills fresh values; the
+		// source timestamps must not be preserved through the copy.
+		newRow := *row
+		newRow.ID = 0
+		newRow.TaskID = destTaskID
+		newRow.DefinitionID = newDefID
+		newRow.Created = time.Time{}
+		newRow.Updated = time.Time{}
+
+		if def.FieldType == CustomFieldTypeSingleSelect && newRow.ValueSingleOptionID != nil {
+			// A nil optionRemap means identity (same-project duplication).
+			if optionRemap != nil {
+				mapped, ok := optionRemap[*newRow.ValueSingleOptionID]
+				if !ok {
+					return ErrInvalidCustomFieldValue{Message: fmt.Sprintf("No destination option for source option %d.", *newRow.ValueSingleOptionID)}
+				}
+				newRow.ValueSingleOptionID = &mapped
+			}
+		}
+
+		// Rescale number values to the destination precision: the preflight
+		// guaranteed representability, so the scaled integer changes (12.3 @ p1
+		// = 123 becomes 1230 @ p2), never the value itself.
+		if def.FieldType == CustomFieldTypeNumber && newRow.ValueNumber != nil {
+			destDef, ok := destDefMap[newDefID]
+			if !ok {
+				return missingCustomFieldDefinitionError(row)
+			}
+			scaled, err := rescaleNumberValueForCopy(s, row, def, destDef)
+			if err != nil {
+				return err
+			}
+			newRow.ValueNumber = scaled
+		}
+
+		if _, err := s.Insert(&newRow); err != nil {
+			return err
+		}
+
+		if def.FieldType == CustomFieldTypeMultiSelect {
+			remapped, err := remapOptionIDs(optionIDsByValue[row.ID], optionRemap)
+			if err != nil {
+				return err
+			}
+			if err := replaceValueOptions(s, newRow.ID, remapped); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// rescaleNumberValueForCopy re-scales a stored number value to the destination
+// definition's precision. The preflight guaranteed representability, so the
+// scaled integer changes, never the value itself.
+func rescaleNumberValueForCopy(s *xorm.Session, row *TaskCustomFieldValue, srcDef, destDef *CustomFieldDefinition) (*int64, error) {
+	value, err := row.FromRow(s, srcDef)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateNumberValue(value, destDef); err != nil {
+		return nil, err
+	}
+	scaled := value.Number.Value
+	return &scaled, nil
+}
+
+// remapOptionIDs maps a slice of option ids through the remap table (nil means
+// identity).
+func remapOptionIDs(optionIDs []int64, optionRemap map[int64]int64) ([]int64, error) {
+	remapped := make([]int64, 0, len(optionIDs))
+	for _, optID := range optionIDs {
+		mapped := optID
+		if optionRemap != nil {
+			m, ok := optionRemap[optID]
+			if !ok {
+				return nil, ErrInvalidCustomFieldValue{Message: fmt.Sprintf("No destination option for source option %d.", optID)}
+			}
+			mapped = m
+		}
+		remapped = append(remapped, mapped)
+	}
+	return remapped, nil
+}
+
+// remapDefinitionID maps a source definition id through the remap table (nil
+// means identity).
+func remapDefinitionID(defID int64, defRemap map[int64]int64) (int64, error) {
+	if defRemap == nil {
+		return defID, nil
+	}
+	mapped, ok := defRemap[defID]
+	if !ok {
+		return 0, ErrInvalidCustomFieldValue{Message: fmt.Sprintf("No destination definition for source definition %d.", defID)}
+	}
+	return mapped, nil
+}
+
+// destinationDefMapForCopy loads the destination definitions of the rows being
+// copied, so number values can be rescaled to the destination precision.
+func destinationDefMapForCopy(s *xorm.Session, rows []*TaskCustomFieldValue, defRemap map[int64]int64) (map[int64]*CustomFieldDefinition, error) {
+	destDefIDs := make([]int64, 0, len(rows))
+	seen := map[int64]struct{}{}
+	for _, row := range rows {
+		newDefID, err := remapDefinitionID(row.DefinitionID, defRemap)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[newDefID]; ok {
+			continue
+		}
+		seen[newDefID] = struct{}{}
+		destDefIDs = append(destDefIDs, newDefID)
+	}
+	destDefs, err := getCustomFieldDefinitionsByIDs(s, destDefIDs)
+	if err != nil {
+		return nil, err
+	}
+	destDefMap := make(map[int64]*CustomFieldDefinition, len(destDefs))
+	for _, def := range destDefs {
+		destDefMap[def.ID] = def
+	}
+	return destDefMap, nil
 }

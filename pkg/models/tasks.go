@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"code.vikunja.io/api/pkg/config"
+	"code.vikunja.io/api/pkg/db"
 	"code.vikunja.io/api/pkg/events"
 	"code.vikunja.io/api/pkg/files"
 	"code.vikunja.io/api/pkg/log"
@@ -41,6 +42,7 @@ import (
 	"github.com/jinzhu/copier"
 	"xorm.io/builder"
 	"xorm.io/xorm"
+	"xorm.io/xorm/schemas"
 )
 
 type TaskRepeatMode int
@@ -198,6 +200,9 @@ type Task struct {
 type TaskWithComments struct {
 	Task
 	Comments []*TaskComment `xorm:"-" json:"comments"`
+
+	// Custom-field values, carried by the user-data export.
+	CustomFieldValues []*CustomFieldTaskValueExport `xorm:"-" json:"custom_field_values"`
 }
 
 // TableName returns the table name for tasks
@@ -1329,6 +1334,27 @@ func (t *Task) updateSingleTask(s *xorm.Session, a web.Auth, fields []string) (e
 		t.ProjectID = ot.ProjectID
 	}
 
+	// The bulk API promises that only named fields are read: an ignored
+	// project_id in the payload must not trigger a custom-field move preflight.
+	if len(fields) > 0 && !slices.Contains(fields, "project_id") {
+		t.ProjectID = ot.ProjectID
+	}
+
+	// Preflight the custom-field move before any mutation: the whole move is
+	// rejected when a populated value lacks a compatible destination. The task
+	// row lock taken here serializes concurrent value writes, and the source and
+	// destination definitions are locked in one ascending id order.
+	var defRemap, optionRemap map[int64]int64
+	if ot.ProjectID != t.ProjectID {
+		if err = lockTaskRow(s, t.ID); err != nil {
+			return err
+		}
+		defRemap, optionRemap, err = preflightTaskMoveCustomFields(s, t.ID, t.ProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Get the stored reminders
 	reminders, err := getRemindersForTasks(s, []int64{t.ID})
 	if err != nil {
@@ -1494,6 +1520,13 @@ func (t *Task) updateSingleTask(s *xorm.Session, a web.Auth, fields []string) (e
 			if err != nil {
 				return err
 			}
+		}
+
+		// Rewrite the custom-field values onto the destination definitions and
+		// options. The task row lock held since the preflight guarantees no
+		// value was written in between.
+		if err = rewriteTaskCustomFieldsForMove(s, t.ID, defRemap, optionRemap); err != nil {
+			return err
 		}
 	}
 
@@ -1697,7 +1730,10 @@ func updateTasks(s *xorm.Session, a web.Auth, t *Task, ids []int64, fields []str
 	for _, et := range existing {
 		projectIDs = append(projectIDs, et.ProjectID)
 	}
-	if t.ProjectID != 0 {
+	// Only lock the destination project's views when the field mask actually
+	// moves the tasks: an empty mask applies every field, otherwise a named
+	// project_id is required.
+	if t.ProjectID != 0 && (len(fields) == 0 || slices.Contains(fields, "project_id")) {
 		projectIDs = append(projectIDs, t.ProjectID)
 	}
 
@@ -2127,6 +2163,22 @@ func updateTaskLastUpdated(s *xorm.Session, task *Task) error {
 	return err
 }
 
+// lockTaskRow serializes value-affecting operations on the task row without
+// touching any timestamp. Custom-field value writes and task moves both take
+// this lock before any definition lock, so the lock order is consistently
+// task-then-definition and no AB-BA deadlock is possible. PostgreSQL/MySQL use
+// SELECT ... FOR UPDATE; SQLite has no FOR UPDATE, so a no-op write takes the
+// database write lock as the first statement.
+func lockTaskRow(s *xorm.Session, taskID int64) error {
+	if db.Type() == schemas.SQLITE {
+		// NoAutoTime keeps the no-op write from auto-filling the updated column.
+		_, err := s.NoAutoTime().ID(taskID).Cols("id").Update(&Task{ID: taskID})
+		return err
+	}
+	_, err := s.ForUpdate().Where("id = ?", taskID).Get(&Task{})
+	return err
+}
+
 // Delete implements the delete method for a task
 // @Summary Delete a task
 // @Description Deletes a task from a project. This does not mean "mark it done".
@@ -2282,6 +2334,11 @@ func hardDeleteTask(s *xorm.Session, t *Task) (err error) {
 
 	_, err = s.Where("task_id = ?", t.ID).Delete(&TaskBucket{})
 	if err != nil {
+		return
+	}
+
+	// Custom-field values and their memberships must not outlive the task row.
+	if err = deleteTaskCustomFieldValues(s, t.ID); err != nil {
 		return
 	}
 

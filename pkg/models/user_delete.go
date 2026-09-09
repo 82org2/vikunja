@@ -178,6 +178,13 @@ func DeleteUser(s *xorm.Session, u *user.User) (err error) {
 		}
 	}
 
+	// Unset user-type custom-field values referencing the deleted user. This is
+	// not a plain entry in the loop above because it must also advance each
+	// affected task's updated timestamp for ETag consistency.
+	if err = unsetCustomFieldUserValues(s, u.ID); err != nil {
+		return err
+	}
+
 	// Notify before deleting the user row, because ShouldNotify will try to
 	// look up the user and fail if the row is already gone.
 	err = notifications.Notify(u, &user.AccountDeletedNotification{

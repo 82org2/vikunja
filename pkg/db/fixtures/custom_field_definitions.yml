@@ -89,3 +89,53 @@
   position: 1
   updated: 2018-12-02 15:13:12
   created: 2018-12-01 15:13:12
+- id: 12
+  project_id: 12
+  machine_key: impact
+  title: Impact
+  field_type: number
+  position: 1
+  configuration: '{"precision":1}'
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 13
+  project_id: 12
+  machine_key: status
+  title: Status
+  field_type: single_select
+  position: 3
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 14
+  project_id: 12
+  machine_key: tags
+  title: Tags
+  field_type: multi_select
+  position: 4
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 15
+  project_id: 12
+  machine_key: reviewed
+  title: Reviewed
+  field_type: boolean
+  position: 5
+  is_archived: true
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 16
+  project_id: 12
+  machine_key: owner
+  title: Owner
+  field_type: user
+  position: 6
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 17
+  project_id: 12
+  machine_key: target_date
+  title: Target Date
+  field_type: short_text
+  position: 2
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12

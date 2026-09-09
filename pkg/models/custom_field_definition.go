@@ -209,6 +209,22 @@ func getCustomFieldDefinitionsForProject(s *xorm.Session, projectID int64) ([]*C
 	return defs, err
 }
 
+// getCustomFieldDefinitionsByProjectIDs loads the definitions of several
+// projects in bounded chunks, without an archived filter: archived definitions
+// must still describe retained values.
+func getCustomFieldDefinitionsByProjectIDs(s *xorm.Session, projectIDs []int64) ([]*CustomFieldDefinition, error) {
+	defs := []*CustomFieldDefinition{}
+	const batchSize = 500
+	for chunk := range slices.Chunk(projectIDs, batchSize) {
+		batch := []*CustomFieldDefinition{}
+		if err := s.In("project_id", chunk).Find(&batch); err != nil {
+			return nil, err
+		}
+		defs = append(defs, batch...)
+	}
+	return defs, nil
+}
+
 // getCustomFieldDefinitionsByIDs loads definitions by their ids without an
 // archived filter: archived definitions must still describe retained values.
 // The query is chunked to stay bounded on large id sets.
@@ -419,6 +435,55 @@ func (d *CustomFieldDefinition) DeletePermanently(s *xorm.Session, deleteValues 
 	return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
 }
 
+// deleteCustomFieldDefinitionsForProject removes the definitions and options
+// of a project in the wiki's order: memberships, values, options, then
+// definitions. Task purging normally removes values, but historical or
+// inconsistent data may reference these definitions from other tasks, so values
+// are deleted here too rather than assumed gone. Bounded batches throughout.
+func deleteCustomFieldDefinitionsForProject(s *xorm.Session, projectID int64) error {
+	defs := []*CustomFieldDefinition{}
+	if err := s.Where("project_id = ?", projectID).Cols("id").Find(&defs); err != nil {
+		return err
+	}
+	defIDs := make([]int64, 0, len(defs))
+	for _, def := range defs {
+		defIDs = append(defIDs, def.ID)
+	}
+	if len(defIDs) == 0 {
+		return nil
+	}
+
+	const batchSize = 500
+	for chunk := range slices.Chunk(defIDs, batchSize) {
+		// Delete memberships and values in bounded batches so a definition at
+		// the documented limits never builds an oversized IN list.
+		for {
+			rows := []*TaskCustomFieldValue{}
+			if err := s.In("definition_id", chunk).Limit(batchSize).Cols("id").Find(&rows); err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				break
+			}
+			valueIDs := make([]int64, 0, len(rows))
+			for _, row := range rows {
+				valueIDs = append(valueIDs, row.ID)
+			}
+			if _, err := s.In("value_id", valueIDs).Delete(&CustomFieldValueOption{}); err != nil {
+				return err
+			}
+			if _, err := s.In("id", valueIDs).Delete(&TaskCustomFieldValue{}); err != nil {
+				return err
+			}
+		}
+		if _, err := s.In("definition_id", chunk).Delete(&CustomFieldOption{}); err != nil {
+			return err
+		}
+	}
+	_, err := s.Where("project_id = ?", projectID).Delete(&CustomFieldDefinition{})
+	return err
+}
+
 // --- write path ---
 
 func (d *CustomFieldDefinition) validate(s *xorm.Session) error {
@@ -585,6 +650,18 @@ func validateConfigurationAgainstStoredValues(s *xorm.Session, existing, updated
 // format limits, the number configuration, option ownership, and user
 // visibility. It is shared by defaults and by value set operations.
 func validateValueAgainstDefinition(s *xorm.Session, v *CustomFieldValue, def *CustomFieldDefinition) error {
+	return validateValueAgainstDefinitionWithOptionCheck(s, v, def, false)
+}
+
+// validateValueAgainstDefinitionAllowArchivedOptions is the import variant:
+// retained values may reference archived options, which continue to describe
+// retained values. Set-time validation rejects archived options because they
+// can no longer be newly selected.
+func validateValueAgainstDefinitionAllowArchivedOptions(s *xorm.Session, v *CustomFieldValue, def *CustomFieldDefinition) error {
+	return validateValueAgainstDefinitionWithOptionCheck(s, v, def, true)
+}
+
+func validateValueAgainstDefinitionWithOptionCheck(s *xorm.Session, v *CustomFieldValue, def *CustomFieldDefinition, allowArchivedOptions bool) error {
 	if v == nil {
 		return nil
 	}
@@ -610,10 +687,10 @@ func validateValueAgainstDefinition(s *xorm.Session, v *CustomFieldValue, def *C
 	case CustomFieldTypeURL:
 		return validateURLValue(*v.URL)
 	case CustomFieldTypeSingleSelect:
-		return validateOptionValue(s, *v.SingleOptionID, def)
+		return validateOptionValueWithArchived(s, *v.SingleOptionID, def, allowArchivedOptions)
 	case CustomFieldTypeMultiSelect:
 		for _, id := range v.OptionIDs {
-			if err := validateOptionValue(s, id, def); err != nil {
+			if err := validateOptionValueWithArchived(s, id, def, allowArchivedOptions); err != nil {
 				return err
 			}
 		}
@@ -673,10 +750,11 @@ func validateURLValue(raw string) error {
 	return nil
 }
 
-// validateOptionValue rejects unknown, foreign, and archived options. Archived
-// options can no longer be selected but continue to describe retained values,
-// which is why this check runs at set time and not when loading values.
-func validateOptionValue(s *xorm.Session, optionID int64, def *CustomFieldDefinition) error {
+// validateOptionValueWithArchived checks option ownership and, unless
+// allowArchived is set, rejects archived options. Import and moves allow
+// archived options because they relocate retained values rather than selecting
+// new ones.
+func validateOptionValueWithArchived(s *xorm.Session, optionID int64, def *CustomFieldDefinition, allowArchived bool) error {
 	opt, err := GetCustomFieldOptionByID(s, optionID)
 	if err != nil {
 		return err
@@ -684,7 +762,7 @@ func validateOptionValue(s *xorm.Session, optionID int64, def *CustomFieldDefini
 	if opt.DefinitionID != def.ID {
 		return ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The option %d does not belong to this definition.", optionID)}
 	}
-	if opt.IsArchived {
+	if !allowArchived && opt.IsArchived {
 		return ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The option %d is archived and can no longer be selected.", optionID)}
 	}
 	return nil

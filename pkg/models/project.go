@@ -105,6 +105,10 @@ type ProjectWithTasksAndBuckets struct {
 	TaskBuckets      []*TaskBucket   `xorm:"-" json:"task_buckets"`
 	Positions        []*TaskPosition `xorm:"-" json:"positions"`
 	BackgroundFileID int64           `xorm:"null" json:"background_file_id"`
+
+	// Custom-field definitions and options, carried by the user-data export.
+	CustomFieldDefinitions []*CustomFieldDefinitionExport `xorm:"-" json:"custom_field_definitions"`
+	CustomFieldOptions     []*CustomFieldOptionExport     `xorm:"-" json:"custom_field_options"`
 }
 
 // TableName returns a better name for the projects table
@@ -1390,6 +1394,13 @@ func (p *Project) Delete(s *xorm.Session, a web.Auth) (err error) {
 		if err != nil {
 			return err
 		}
+	}
+
+	// Remove the project's custom-field definitions and options. Values were
+	// purged with their tasks, but the cleanup is definition-complete so
+	// inconsistent historical rows cannot survive the project.
+	if err = deleteCustomFieldDefinitionsForProject(s, p.ID); err != nil {
+		return err
 	}
 
 	fullProject, err := GetProjectSimpleByID(s, p.ID)

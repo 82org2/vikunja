@@ -48,3 +48,39 @@
   position: 1
   updated: 2018-12-02 15:13:12
   created: 2018-12-01 15:13:12
+- id: 8
+  definition_id: 13
+  machine_key: todo
+  label: To Do
+  position: 1
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 9
+  definition_id: 13
+  machine_key: done
+  label: Done
+  position: 2
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 10
+  definition_id: 14
+  machine_key: backend
+  label: Backend
+  position: 1
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 11
+  definition_id: 14
+  machine_key: frontend
+  label: Frontend
+  position: 2
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 12
+  definition_id: 14
+  machine_key: docs
+  label: Docs
+  is_archived: true
+  position: 3
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12

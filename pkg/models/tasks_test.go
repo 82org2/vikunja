@@ -273,8 +273,10 @@ func TestTask_Update(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
+		// Task 4 has no custom-field values, so the move is not subject to the
+		// custom-field destination preflight.
 		task := &Task{
-			ID:        1,
+			ID:        4,
 			ProjectID: 2,
 		}
 		err := task.Update(s, u)
@@ -339,8 +341,10 @@ func TestTask_Update(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
+		// Task 4 has no custom-field values, so the move is not subject to the
+		// custom-field destination preflight.
 		task := &Task{
-			ID:        1,
+			ID:        4,
 			ProjectID: 2,
 		}
 		err := task.Update(s, u)
@@ -349,11 +353,11 @@ func TestTask_Update(t *testing.T) {
 		require.NoError(t, err)
 
 		db.AssertExists(t, "tasks", map[string]interface{}{
-			"id":         1,
+			"id":         4,
 			"project_id": 2,
 		}, false)
 		db.AssertExists(t, "task_buckets", map[string]interface{}{
-			"task_id":   1,
+			"task_id":   4,
 			"bucket_id": 40,
 		}, false)
 	})
@@ -362,8 +366,10 @@ func TestTask_Update(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
+		// Task 5 has no custom-field values, so the move is not subject to the
+		// custom-field destination preflight.
 		task := &Task{
-			ID:        2,
+			ID:        5,
 			Done:      true,
 			ProjectID: 2,
 		}

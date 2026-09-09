@@ -31,6 +31,11 @@ type TaskDuplicate struct {
 	// The task id of the task to duplicate
 	TaskID int64 `json:"-" param:"projecttask"`
 
+	// The project to duplicate the task into. Defaults to the original task's
+	// project. Cross-project duplication requires a compatible custom-field
+	// destination and write access on the destination project.
+	ProjectID int64 `json:"project_id,omitempty" doc:"The project to duplicate the task into. Defaults to the original task's project."`
+
 	// The duplicated task
 	Task *Task `json:"duplicated_task,omitempty" readOnly:"true" doc:"The newly created duplicate task, populated by the server in the response."`
 
@@ -47,8 +52,12 @@ func (td *TaskDuplicate) CanCreate(s *xorm.Session, a web.Auth) (canCreate bool,
 		return canRead, err
 	}
 
-	// Need write access on the project to create tasks in it
-	p := &Project{ID: originalTask.ProjectID}
+	// Need write access on the destination project to create tasks in it
+	destProjectID := originalTask.ProjectID
+	if td.ProjectID != 0 {
+		destProjectID = td.ProjectID
+	}
+	p := &Project{ID: destProjectID}
 	return p.CanWrite(s, a)
 }
 
@@ -72,13 +81,36 @@ func (td *TaskDuplicate) Create(s *xorm.Session, doer web.Auth) (err error) {
 		return err
 	}
 
+	destProjectID := originalTask.ProjectID
+	if td.ProjectID != 0 {
+		destProjectID = td.ProjectID
+	}
+
+	// Lock the source task row so a concurrent value write cannot interleave
+	// between the preflight and the copy, and so the copy reads an atomic
+	// snapshot.
+	if err = lockTaskRow(s, td.TaskID); err != nil {
+		return err
+	}
+
+	// Cross-project duplication maps custom-field values like a move: the whole
+	// operation is rejected before any mutation when a populated value lacks a
+	// compatible destination.
+	var defRemap, optionRemap map[int64]int64
+	if destProjectID != originalTask.ProjectID {
+		defRemap, optionRemap, err = preflightTaskMoveCustomFields(s, td.TaskID, destProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Create the new task
 	newTask := &Task{
 		Title:       originalTask.Title,
 		Description: originalTask.Description,
 		Done:        false,
 		DueDate:     originalTask.DueDate,
-		ProjectID:   originalTask.ProjectID,
+		ProjectID:   destProjectID,
 		RepeatAfter: originalTask.RepeatAfter,
 		RepeatMode:  originalTask.RepeatMode,
 		Priority:    originalTask.Priority,
@@ -92,6 +124,13 @@ func (td *TaskDuplicate) Create(s *xorm.Session, doer web.Auth) (err error) {
 
 	err = createTask(s, newTask, doer, true, true)
 	if err != nil {
+		return err
+	}
+
+	// Copy the custom-field values exactly: same-project uses identity maps,
+	// cross-project the preflight remap. The copy clears any defaults
+	// materialized by createTask so unset fields stay unset.
+	if err = copyTaskCustomFieldValues(s, td.TaskID, newTask.ID, defRemap, optionRemap); err != nil {
 		return err
 	}
 

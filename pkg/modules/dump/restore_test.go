@@ -17,11 +17,18 @@
 package dump
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"testing"
+
+	"code.vikunja.io/api/pkg/db"
+	"code.vikunja.io/api/pkg/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"xorm.io/builder"
 )
 
 func TestConvertFieldValue(t *testing.T) {
@@ -148,5 +155,75 @@ func TestConvertFieldValue(t *testing.T) {
 			require.NoError(t, err)
 			assert.InEpsilon(t, -123.45, result, 0.0001)
 		})
+	})
+}
+
+func TestRestoreCustomFieldColumns(t *testing.T) {
+	t.Run("round-trips JSON and position columns", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+
+		// Build the dump payload for the four custom-field tables the same way
+		// db.Dump does, so the restore path is exercised without dumping every
+		// registered table (some are not synced in this test engine). Without
+		// the jsonFields/floatFields maps, the configuration and default_value
+		// JSON columns would come back as base64 text and the position columns
+		// as strings.
+		data := make(map[string][]byte)
+		for _, table := range []string{"custom_field_definitions", "custom_field_options", "custom_field_values", "custom_field_value_options"} {
+			rows := []map[string]interface{}{}
+			require.NoError(t, s.Table(table).Find(&rows))
+			content, err := json.Marshal(rows)
+			require.NoError(t, err)
+			data[table] = content
+		}
+
+		files := make(map[string]*zip.File)
+		{
+			var buf bytes.Buffer
+			zw := zip.NewWriter(&buf)
+			for table, content := range data {
+				w, err := zw.Create(table)
+				require.NoError(t, err)
+				_, err = w.Write(content)
+				require.NoError(t, err)
+			}
+			require.NoError(t, zw.Close())
+			zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+			require.NoError(t, err)
+			for _, f := range zr.File {
+				files[f.Name] = f
+			}
+		}
+
+		// Clear the tables and restore from the dump.
+		_, err := s.Where(builder.Gt{"id": 0}).Delete(&models.CustomFieldValueOption{})
+		require.NoError(t, err)
+		_, err = s.Where(builder.Gt{"id": 0}).Delete(&models.TaskCustomFieldValue{})
+		require.NoError(t, err)
+		_, err = s.Where(builder.Gt{"id": 0}).Delete(&models.CustomFieldOption{})
+		require.NoError(t, err)
+		_, err = s.Where(builder.Gt{"id": 0}).Delete(&models.CustomFieldDefinition{})
+		require.NoError(t, err)
+		require.NoError(t, s.Commit())
+
+		require.NoError(t, restoreTableData(files))
+
+		// The definition's configuration JSON and position double survive.
+		def := &models.CustomFieldDefinition{}
+		exists, err := s.Where("id = ?", 1).Get(def)
+		require.NoError(t, err)
+		require.True(t, exists)
+		require.NotNil(t, def.Configuration)
+		assert.Equal(t, 1, *def.Configuration.Precision)
+		assert.InEpsilon(t, 1.0, def.Position, 0.0001)
+
+		// The option's position double survives.
+		opt := &models.CustomFieldOption{}
+		exists, err = s.Where("id = ?", 1).Get(opt)
+		require.NoError(t, err)
+		require.True(t, exists)
+		assert.InEpsilon(t, 1.0, opt.Position, 0.0001)
 	})
 }

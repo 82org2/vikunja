@@ -410,7 +410,7 @@ func TestTaskBucket_Update(t *testing.T) {
 		func() {
 			s := db.NewSession()
 			defer s.Close()
-			_, err := s.ID(2).Cols("done_at").Update(&Task{DoneAt: doneAt})
+			_, err := s.ID(5).Cols("done_at").Update(&Task{DoneAt: doneAt})
 			require.NoError(t, err)
 			err = s.Commit()
 			require.NoError(t, err)
@@ -420,7 +420,7 @@ func TestTaskBucket_Update(t *testing.T) {
 		func() {
 			s := db.NewSession()
 			defer s.Close()
-			task := &Task{ID: 2, Done: true, ProjectID: 9}
+			task := &Task{ID: 5, Done: true, ProjectID: 9}
 			err := task.Update(s, u)
 			require.NoError(t, err)
 			err = s.Commit()
@@ -432,7 +432,7 @@ func TestTaskBucket_Update(t *testing.T) {
 			s := db.NewSession()
 			defer s.Close()
 			var task Task
-			_, err := s.ID(2).Get(&task)
+			_, err := s.ID(5).Get(&task)
 			require.NoError(t, err)
 			assert.True(t, task.Done)
 			assert.WithinDuration(t, doneAt, task.DoneAt, time.Second)
@@ -442,7 +442,7 @@ func TestTaskBucket_Update(t *testing.T) {
 		func() {
 			s := db.NewSession()
 			defer s.Close()
-			task := &Task{ID: 2, Done: true, ProjectID: 1}
+			task := &Task{ID: 5, Done: true, ProjectID: 1}
 			err := task.Update(s, u)
 			require.NoError(t, err)
 			err = s.Commit()
@@ -454,7 +454,7 @@ func TestTaskBucket_Update(t *testing.T) {
 			s := db.NewSession()
 			defer s.Close()
 			var task Task
-			_, err := s.ID(2).Get(&task)
+			_, err := s.ID(5).Get(&task)
 			require.NoError(t, err)
 			assert.True(t, task.Done)
 			assert.WithinDuration(t, doneAt, task.DoneAt, time.Second)

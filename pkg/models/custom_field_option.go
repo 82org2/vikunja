@@ -72,6 +72,21 @@ func GetCustomFieldOptionByID(s *xorm.Session, id int64) (*CustomFieldOption, er
 	return opt, nil
 }
 
+// GetCustomFieldOptionByKeyAndDefinition loads an option by its machine key
+// within a definition. Moves, duplication, and import resolve options by key
+// so a foreign numeric id is never trusted.
+func GetCustomFieldOptionByKeyAndDefinition(s *xorm.Session, definitionID int64, machineKey string) (*CustomFieldOption, error) {
+	opt := &CustomFieldOption{}
+	exists, err := s.Where("definition_id = ? AND machine_key = ?", definitionID, machineKey).Get(opt)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrCustomFieldOptionDoesNotExist{OptionID: 0}
+	}
+	return opt, nil
+}
+
 // loadCustomFieldOptionWithDefinition resolves an option only when it belongs to
 // the definition in the path and that definition to the project in the path.
 // Any mismatch resolves to a not-found error so a wrong-parent path never leaks

@@ -17,6 +17,9 @@
 package models
 
 import (
+	"fmt"
+	"slices"
+	"sort"
 	"time"
 
 	"xorm.io/xorm"
@@ -66,6 +69,80 @@ func getOptionIDsForValue(s *xorm.Session, valueID int64) ([]int64, error) {
 	ordered := make([]int64, 0, len(options))
 	for _, opt := range options {
 		ordered = append(ordered, opt.ID)
+	}
+	return ordered, nil
+}
+
+// getOptionIDsForValues is the batched form of getOptionIDsForValue: it returns
+// every value's option ids ordered by option position (id as tie-break) in two
+// chunked queries total, regardless of how many values are requested, so task
+// reads never issue a query per multi-select value.
+//
+// valueDefinitions maps each value row to its definition id. Every membership
+// must resolve to an existing option of that definition; anything else is
+// corrupt stored data and fails loudly. Archived options remain valid.
+func getOptionIDsForValues(s *xorm.Session, valueIDs []int64, valueDefinitions map[int64]int64) (map[int64][]int64, error) {
+	ordered := make(map[int64][]int64, len(valueIDs))
+	for _, id := range valueIDs {
+		ordered[id] = []int64{}
+	}
+	if len(valueIDs) == 0 {
+		return ordered, nil
+	}
+
+	memberships := []*CustomFieldValueOption{}
+	const batchSize = 500
+	for chunk := range slices.Chunk(valueIDs, batchSize) {
+		batch := []*CustomFieldValueOption{}
+		if err := s.In("value_id", chunk).Find(&batch); err != nil {
+			return nil, err
+		}
+		memberships = append(memberships, batch...)
+	}
+	if len(memberships) == 0 {
+		return ordered, nil
+	}
+
+	optionIDs := make([]int64, 0, len(memberships))
+	seen := map[int64]struct{}{}
+	for _, m := range memberships {
+		if _, ok := seen[m.OptionID]; ok {
+			continue
+		}
+		seen[m.OptionID] = struct{}{}
+		optionIDs = append(optionIDs, m.OptionID)
+	}
+
+	options := []*CustomFieldOption{}
+	for chunk := range slices.Chunk(optionIDs, batchSize) {
+		batch := []*CustomFieldOption{}
+		if err := s.In("id", chunk).Find(&batch); err != nil {
+			return nil, err
+		}
+		options = append(options, batch...)
+	}
+	optionByID := make(map[int64]*CustomFieldOption, len(options))
+	for _, opt := range options {
+		optionByID[opt.ID] = opt
+	}
+
+	for _, m := range memberships {
+		opt, ok := optionByID[m.OptionID]
+		if !ok {
+			return nil, ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The multi-select membership %d references an option that does not exist.", m.ID)}
+		}
+		if opt.DefinitionID != valueDefinitions[m.ValueID] {
+			return nil, ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The multi-select membership %d references an option from a different definition.", m.ID)}
+		}
+		ordered[m.ValueID] = append(ordered[m.ValueID], m.OptionID)
+	}
+	for _, ids := range ordered {
+		sort.SliceStable(ids, func(i, j int) bool {
+			if optionByID[ids[i]].Position != optionByID[ids[j]].Position {
+				return optionByID[ids[i]].Position < optionByID[ids[j]].Position
+			}
+			return ids[i] < ids[j]
+		})
 	}
 	return ordered, nil
 }

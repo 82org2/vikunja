@@ -30,25 +30,33 @@ import (
 
 // expandDoc lists the accepted expand values; shared between the by-id and
 // by-index operations so the docs stay in sync.
-const expandDoc = "Embed extra, more expensive data in each task. Repeatable. One of: subtasks, buckets, reactions, comments, comment_count, time_entries_count, is_unread. Expanding can return more tasks than the page limit (subtasks) and inflate the response."
+const expandDoc = "Embed extra, more expensive data in each task. Repeatable. One of: subtasks, buckets, reactions, comments, comment_count, time_entries_count, is_unread, custom_fields. Expanding can return more tasks than the page limit (subtasks) and inflate the response."
 
 // parseTaskExpand turns the raw `expand` query values into validated
 // TaskCollectionExpandable entries. Kept package-level for the TaskCollection
 // list endpoint, which accepts the same option. An invalid value returns the
 // model's own validation error, which translateDomainError maps to 422.
-func parseTaskExpand(raw []string) ([]models.TaskCollectionExpandable, error) {
+//
+// custom_fields is a v2-only expansion and not a valid shared expand value, so
+// it is returned as a separate flag instead of an entry; the model appends it
+// after its own validation.
+func parseTaskExpand(raw []string) (expand []models.TaskCollectionExpandable, expandCustomFields bool, err error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
-	expand := make([]models.TaskCollectionExpandable, 0, len(raw))
+	expand = make([]models.TaskCollectionExpandable, 0, len(raw))
 	for _, e := range raw {
+		if e == string(models.TaskCollectionExpandCustomFields) {
+			expandCustomFields = true
+			continue
+		}
 		v := models.TaskCollectionExpandable(e)
 		if err := v.Validate(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		expand = append(expand, v)
 	}
-	return expand, nil
+	return expand, expandCustomFields, nil
 }
 
 // RegisterTaskRoutes wires Task CRUD onto the Huma API. The list lives on
@@ -106,12 +114,13 @@ func init() { AddRouteRegistrar(RegisterTaskRoutes) }
 
 type taskReadOneBody struct {
 	models.Task
-	MaxPermission models.Permission `json:"max_permission" readOnly:"true" doc:"The maximum permission the requesting user has on this task (0=read, 1=read/write, 2=admin)."`
+	MaxPermission models.Permission                             `json:"max_permission" readOnly:"true" doc:"The maximum permission the requesting user has on this task (0=read, 1=read/write, 2=admin)."`
+	CustomFields  *[]*models.TaskCustomFieldValueWithDefinition `json:"custom_fields,omitempty" readOnly:"true" doc:"The custom field values of this task, ordered by definition position. Always present for user sessions and link shares (as [] when the task has none); present for API tokens only when the token has the custom_fields.read_all expansion scope."`
 }
 
 func tasksRead(ctx context.Context, in *struct {
 	ID     int64    `path:"projecttask" doc:"The numeric id of the task."`
-	Expand []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread" doc:"Embed extra data per task. Repeatable."`
+	Expand []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread,custom_fields" doc:"Embed extra data per task. Repeatable. For single-task reads, custom field values are always included for user sessions and link shares; API tokens need the custom_fields.read_all expansion scope."`
 	Format string   `query:"format" enum:"html,markdown" doc:"How rich-text fields are exchanged. See the API description."`
 	conditional.Params
 }) (*singleReadBody[taskReadOneBody], error) {
@@ -119,24 +128,39 @@ func tasksRead(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	expand, err := parseTaskExpand(in.Expand)
+	expand, expandCustomFields, err := parseTaskExpand(in.Expand)
 	if err != nil {
 		return nil, translateDomainError(err)
 	}
-	task := &models.Task{ID: in.ID, Expand: expand}
+	// Single-task reads always include custom field values for user sessions and
+	// link shares; API tokens need the custom_fields.read_all expansion scope. A
+	// token that explicitly requests expand=custom_fields without the scope is
+	// already rejected by the token middleware.
+	ec := echoContextFromCtx(ctx)
+	if ec == nil || (*ec).Get("api_token") == nil || models.TokenHasPermission(ec, "custom_fields", "read_all") {
+		expandCustomFields = true
+	}
+	task := &models.Task{ID: in.ID, Expand: expand, ExpandCustomFields: expandCustomFields}
 	maxPermission, err := handler.DoReadOne(ctx, task, a)
 	if err != nil {
 		return nil, translateDomainError(err)
 	}
-	body := &taskReadOneBody{Task: *task, MaxPermission: models.Permission(maxPermission)}
+	body := &taskReadOneBody{Task: *task, MaxPermission: models.Permission(maxPermission), CustomFields: customFieldsPtr(task.CustomFields)}
 	convertTasksToMarkdown(ctx, &body.Task)
-	return conditionalReadResponse(&in.Params, body, task.Updated, maxPermission)
+	// The ETag folds in the project timestamp when the response carries custom
+	// fields, so definition/option edits invalidate cached task representations
+	// without updating every task row.
+	modified := task.Updated
+	if len(task.CustomFields) > 0 && task.ProjectUpdated.After(modified) {
+		modified = task.ProjectUpdated
+	}
+	return conditionalReadResponse(&in.Params, body, modified, maxPermission)
 }
 
 func tasksReadByIndex(ctx context.Context, in *struct {
 	Project string   `path:"project" doc:"A numeric project id or a textual project identifier (e.g. \"PROJ\")."`
 	Index   int64    `path:"index" doc:"The per-project task index."`
-	Expand  []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread" doc:"Embed extra data per task. Repeatable."`
+	Expand  []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread,custom_fields" doc:"Embed extra data per task. Repeatable. For single-task reads, custom field values are always included for user sessions and link shares; API tokens need the custom_fields.read_all expansion scope."`
 	Format  string   `query:"format" enum:"html,markdown" doc:"How rich-text fields are exchanged. See the API description."`
 	conditional.Params
 }) (*singleReadBody[taskReadOneBody], error) {
@@ -144,9 +168,17 @@ func tasksReadByIndex(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	expand, err := parseTaskExpand(in.Expand)
+	expand, expandCustomFields, err := parseTaskExpand(in.Expand)
 	if err != nil {
 		return nil, translateDomainError(err)
+	}
+	// Single-task reads always include custom field values for user sessions and
+	// link shares; API tokens need the custom_fields.read_all expansion scope. A
+	// token that explicitly requests expand=custom_fields without the scope is
+	// already rejected by the token middleware.
+	ec := echoContextFromCtx(ctx)
+	if ec == nil || (*ec).Get("api_token") == nil || models.TokenHasPermission(ec, "custom_fields", "read_all") {
+		expandCustomFields = true
 	}
 	projectID, err := resolveProjectIdentifier(in.Project)
 	if err != nil {
@@ -155,14 +187,21 @@ func tasksReadByIndex(ctx context.Context, in *struct {
 
 	// ID 0 + ProjectID + Index makes the model resolve the id from the
 	// (project, index) pair in both CanRead and ReadOne.
-	task := &models.Task{ProjectID: projectID, Index: in.Index, Expand: expand}
+	task := &models.Task{ProjectID: projectID, Index: in.Index, Expand: expand, ExpandCustomFields: expandCustomFields}
 	maxPermission, err := handler.DoReadOne(ctx, task, a)
 	if err != nil {
 		return nil, translateDomainError(err)
 	}
-	body := &taskReadOneBody{Task: *task, MaxPermission: models.Permission(maxPermission)}
+	body := &taskReadOneBody{Task: *task, MaxPermission: models.Permission(maxPermission), CustomFields: customFieldsPtr(task.CustomFields)}
 	convertTasksToMarkdown(ctx, &body.Task)
-	return conditionalReadResponse(&in.Params, body, task.Updated, maxPermission)
+	// The ETag folds in the project timestamp when the response carries custom
+	// fields, so definition/option edits invalidate cached task representations
+	// without updating every task row.
+	modified := task.Updated
+	if len(task.CustomFields) > 0 && task.ProjectUpdated.After(modified) {
+		modified = task.ProjectUpdated
+	}
+	return conditionalReadResponse(&in.Params, body, modified, maxPermission)
 }
 
 func tasksCreate(ctx context.Context, in *struct {

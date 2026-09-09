@@ -56,6 +56,11 @@ type TaskCollection struct {
 	// You can set this multiple times with different values.
 	Expand []TaskCollectionExpandable `query:"expand" json:"-"`
 
+	// ExpandCustomFields is the v2-only signal to load custom field values. It is
+	// kept separate from Expand so the shared Validate() can keep rejecting
+	// custom_fields for v1, which must not execute the expansion.
+	ExpandCustomFields bool `xorm:"-" json:"-"`
+
 	isSavedFilter bool
 
 	// forceFlatTasks makes ReadAll always return []*Task, never []*Bucket, even
@@ -77,6 +82,7 @@ const TaskCollectionExpandComments TaskCollectionExpandable = `comments`
 const TaskCollectionExpandCommentCount TaskCollectionExpandable = `comment_count`
 const TaskCollectionExpandTimeEntriesCount TaskCollectionExpandable = `time_entries_count`
 const TaskCollectionExpandIsUnread TaskCollectionExpandable = `is_unread`
+const TaskCollectionExpandCustomFields TaskCollectionExpandable = `custom_fields`
 
 // Validate validates if the TaskCollectionExpandable value is valid.
 func (t TaskCollectionExpandable) Validate() error {
@@ -95,9 +101,28 @@ func (t TaskCollectionExpandable) Validate() error {
 		return nil
 	case TaskCollectionExpandIsUnread:
 		return nil
+	case TaskCollectionExpandCustomFields:
+		// custom_fields is deliberately not a valid shared expand value: it is a
+		// v2-only expansion, signalled through Task/TaskCollection.ExpandCustomFields
+		// so v1 keeps rejecting it as unknown. Falls through to the error below.
 	}
 
 	return InvalidFieldErrorWithMessage([]string{"expand"}, "Expand must be one of the following values: subtasks, buckets, reactions, comments, comment_count, time_entries_count, is_unread")
+}
+
+// validateExpand validates the user-supplied expand values and appends the
+// v2-only custom_fields expansion after validation, so v1 (which never sets
+// ExpandCustomFields) keeps rejecting custom_fields as unknown.
+func (tf *TaskCollection) validateExpand() error {
+	for _, expandValue := range tf.Expand {
+		if err := expandValue.Validate(); err != nil {
+			return err
+		}
+	}
+	if tf.ExpandCustomFields {
+		tf.Expand = append(tf.Expand, TaskCollectionExpandCustomFields)
+	}
+	return nil
 }
 
 func validateTaskField(fieldName string) error {
@@ -303,6 +328,7 @@ func (tf *TaskCollection) ReadAll(s *xorm.Session, a web.Auth, search string, pa
 		tc.ProjectID = tf.ProjectID
 		tc.isSavedFilter = true
 		tc.Expand = tf.Expand
+		tc.ExpandCustomFields = tf.ExpandCustomFields
 		tc.forceFlatTasks = tf.forceFlatTasks
 
 		if tf.Filter != "" {
@@ -360,11 +386,8 @@ func (tf *TaskCollection) ReadAll(s *xorm.Session, a web.Auth, search string, pa
 		return nil, 0, 0, err
 	}
 
-	for _, expandValue := range tf.Expand {
-		err = expandValue.Validate()
-		if err != nil {
-			return nil, 0, 0, err
-		}
+	if err := tf.validateExpand(); err != nil {
+		return nil, 0, 0, err
 	}
 
 	opts.search = search

@@ -451,6 +451,7 @@ func TestCanDoAPIRoute_ExpandScopes(t *testing.T) {
 		"tasks_comments": []string{"read_all"},
 		"reactions":      []string{"read_all"},
 		"time_entries":   []string{"read_all"},
+		"custom_fields":  []string{"read_all"},
 	}
 	for k, v := range basePerms {
 		withScopesPerms[k] = v
@@ -467,6 +468,16 @@ func TestCanDoAPIRoute_ExpandScopes(t *testing.T) {
 				"a token with the expansion scope may expand %s", expand)
 			assert.True(t, do(t, "/api/v2/tasks?expand="+expand, withScopes))
 		}
+	})
+
+	t.Run("custom_fields is a v2-only expansion scope", func(t *testing.T) {
+		// v1 does not support the expansion at all, so it must not require the
+		// scope; v2 requires it.
+		assert.True(t, do(t, "/api/v1/tasks?expand=custom_fields", tasksOnly),
+			"v1 must not require the custom_fields scope")
+		assert.False(t, do(t, "/api/v2/tasks?expand=custom_fields", tasksOnly),
+			"v2 requires the custom_fields scope")
+		assert.True(t, do(t, "/api/v2/tasks?expand=custom_fields", withScopes))
 	})
 
 	t.Run("repeated and comma-mixed expand params", func(t *testing.T) {
@@ -507,5 +518,38 @@ func TestCanDoAPIRoute_ExpandScopes(t *testing.T) {
 		projectsToken := &APIToken{APIPermissions: APIPermissions{"projects": []string{"read_all"}}}
 		assert.True(t, do(t, "/api/v1/projects?expand=comments", projectsToken),
 			"expand on a route which does not consume it must not require any scope")
+	})
+}
+
+// TestCanDoAPIRoute_CustomFieldsScope pins the custom_fields virtual group: it
+// validates for token creation, is discoverable via /routes, and its
+// never-matching path cannot authorize a real route on its own.
+func TestCanDoAPIRoute_CustomFieldsScope(t *testing.T) {
+	apiTokenRoutes = make(map[string]APITokenRoute)
+	apiTokenRoutesV2 = make(map[string]APITokenRoute)
+
+	// Tests reset the package-level tables, wiping the init() registration, so
+	// replicate the virtual group exactly as init() declares it.
+	apiTokenRoutesV2["custom_fields"] = APITokenRoute{
+		"read_all": &RouteDetail{Path: "/custom-fields/*", Method: "GET"},
+	}
+
+	t.Run("validates as a grantable scope", func(t *testing.T) {
+		require.NoError(t, PermissionsAreValid(APIPermissions{"custom_fields": []string{"read_all"}}))
+	})
+
+	t.Run("exposed via the routes payload", func(t *testing.T) {
+		routes := GetAPITokenRoutes()
+		cf, has := routes["custom_fields"]
+		require.True(t, has, "custom_fields must be discoverable for token clients")
+		assert.Equal(t, "GET", cf["read_all"].Method)
+		assert.Contains(t, cf["read_all"].Path, "*")
+	})
+
+	t.Run("does not authorize a real route by itself", func(t *testing.T) {
+		e := echo.New()
+		c := e.NewContext(httptest.NewRequest("GET", "/api/v2/tasks", nil), httptest.NewRecorder())
+		token := &APIToken{APIPermissions: APIPermissions{"custom_fields": []string{"read_all"}}}
+		assert.False(t, CanDoAPIRoute(c, token), "a custom_fields-only token must not authorize a task read")
 	})
 }

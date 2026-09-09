@@ -281,6 +281,19 @@ func GetTasksInBucketsForView(s *xorm.Session, view *ProjectView, projects []*Pr
 		return nil, err
 	}
 
+	// Overlapping filter buckets can put the same task into the map more than
+	// once; the map keeps only the last pointer, so copy the enriched data back
+	// to every earlier duplicate so no bucket's task copy misses the expansion.
+	// BucketID is per-bucket and differs between duplicates, so it is restored
+	// after the copy — otherwise every copy would be placed into the last bucket.
+	for _, task := range tasks {
+		if enriched, ok := taskMap[task.ID]; ok && enriched != task {
+			bucketID := task.BucketID
+			*task = *enriched
+			task.BucketID = bucketID
+		}
+	}
+
 	// Put all tasks in their buckets.
 	// Tasks without a bucket association are not returned by the query above
 	// and therefore will not be part of any bucket in the result.

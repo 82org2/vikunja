@@ -19,6 +19,8 @@ package models
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"time"
 
 	"code.vikunja.io/api/pkg/web"
@@ -58,6 +60,15 @@ func (*TaskCustomFieldValue) TableName() string {
 	return "custom_field_values"
 }
 
+// TaskCustomFieldValueWithDefinition is the wire shape of one populated custom
+// field value on a task: the definition context plus the discriminated value,
+// nested so CustomFieldValue's own schema and marshaler are reused unchanged.
+type TaskCustomFieldValueWithDefinition struct {
+	DefinitionID int64             `json:"definition_id" doc:"The numeric id of the custom field definition this value belongs to."`
+	MachineKey   string            `json:"machine_key" doc:"The immutable machine key of the definition. The stable identity for filtering, export, duplication, and moves."`
+	Value        *CustomFieldValue `json:"value" doc:"The typed value, self-describing via its type discriminant."`
+}
+
 // --- reads ---
 
 func GetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) (*TaskCustomFieldValue, error) {
@@ -77,6 +88,128 @@ func GetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) (*TaskCust
 // checks project write permission, covering users and write-admin link shares.
 func CanWriteCustomFieldValue(s *xorm.Session, taskID int64, a web.Auth) (bool, error) {
 	return (&Task{ID: taskID}).CanWrite(s, a)
+}
+
+// addCustomFieldsToTasks batch-loads the custom field values for the given task
+// ids, ordered per task by definition position. Values and their definitions are
+// loaded in chunked queries, and multi-select memberships in one batched pair of
+// queries regardless of how many values there are, so bulk reads stay bounded.
+// Every task in the map gets a non-nil slice (empty when it has no values) so
+// the expand-active response serializes [] rather than omitting the field.
+//
+// Malformed stored rows fail loudly rather than being silently discarded: a
+// value row whose definition is missing or lives in a different project means
+// the stored data is corrupt.
+func addCustomFieldsToTasks(s *xorm.Session, taskIDs []int64, taskMap map[int64]*Task) error {
+	rows := []*TaskCustomFieldValue{}
+	const batchSize = 500
+	for chunk := range slices.Chunk(taskIDs, batchSize) {
+		batch := []*TaskCustomFieldValue{}
+		if err := s.In("task_id", chunk).Find(&batch); err != nil {
+			return err
+		}
+		rows = append(rows, batch...)
+	}
+
+	for _, task := range taskMap {
+		task.CustomFields = []*TaskCustomFieldValueWithDefinition{}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	defIDs := make([]int64, 0, len(rows))
+	seen := map[int64]struct{}{}
+	for _, row := range rows {
+		if _, ok := seen[row.DefinitionID]; ok {
+			continue
+		}
+		seen[row.DefinitionID] = struct{}{}
+		defIDs = append(defIDs, row.DefinitionID)
+	}
+	defs, err := getCustomFieldDefinitionsByIDs(s, defIDs)
+	if err != nil {
+		return err
+	}
+	defMap := make(map[int64]*CustomFieldDefinition, len(defs))
+	for _, def := range defs {
+		defMap[def.ID] = def
+	}
+
+	// Load every multi-select value's memberships in one batched pair of queries
+	// instead of two queries per value inside FromRow.
+	multiSelectValueIDs := make([]int64, 0, len(rows))
+	valueDefinitions := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		def, ok := defMap[row.DefinitionID]
+		if !ok {
+			return missingCustomFieldDefinitionError(row)
+		}
+		if def.FieldType == CustomFieldTypeMultiSelect {
+			multiSelectValueIDs = append(multiSelectValueIDs, row.ID)
+			valueDefinitions[row.ID] = row.DefinitionID
+		}
+	}
+	optionIDsByValue, err := getOptionIDsForValues(s, multiSelectValueIDs, valueDefinitions)
+	if err != nil {
+		return err
+	}
+
+	byTask := make(map[int64][]*TaskCustomFieldValue, len(rows))
+	for _, row := range rows {
+		byTask[row.TaskID] = append(byTask[row.TaskID], row)
+	}
+	for taskID, taskRows := range byTask {
+		task, ok := taskMap[taskID]
+		if !ok {
+			continue
+		}
+		values := make([]*TaskCustomFieldValueWithDefinition, 0, len(taskRows))
+		for _, row := range taskRows {
+			def, ok := defMap[row.DefinitionID]
+			if !ok {
+				return missingCustomFieldDefinitionError(row)
+			}
+			if def.ProjectID != task.ProjectID {
+				return ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The custom field value row %d references a definition from a different project.", row.ID)}
+			}
+			var value *CustomFieldValue
+			if def.FieldType == CustomFieldTypeMultiSelect {
+				if row.populatedStoredFields() != 0 {
+					return ErrInvalidCustomFieldValue{Message: "The stored value row for a multi-select field must not have a typed column."}
+				}
+				optionIDs := optionIDsByValue[row.ID]
+				if len(optionIDs) == 0 {
+					return ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The multi-select value row %d has no memberships; an empty selection must be unset.", row.ID)}
+				}
+				value = &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: optionIDs}
+			} else {
+				value, err = row.FromRow(s, def)
+				if err != nil {
+					return err
+				}
+			}
+			values = append(values, &TaskCustomFieldValueWithDefinition{
+				DefinitionID: def.ID,
+				MachineKey:   def.MachineKey,
+				Value:        value,
+			})
+		}
+		sort.SliceStable(values, func(i, j int) bool {
+			di := defMap[values[i].DefinitionID]
+			dj := defMap[values[j].DefinitionID]
+			if di.Position != dj.Position {
+				return di.Position < dj.Position
+			}
+			return di.ID < dj.ID
+		})
+		task.CustomFields = values
+	}
+	return nil
+}
+
+func missingCustomFieldDefinitionError(row *TaskCustomFieldValue) error {
+	return ErrInvalidCustomFieldValue{Message: fmt.Sprintf("The custom field value row %d references a definition that does not exist.", row.ID)}
 }
 
 // --- write path ---

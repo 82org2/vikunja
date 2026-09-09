@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -206,6 +207,22 @@ func getCustomFieldDefinitionsForProject(s *xorm.Session, projectID int64) ([]*C
 	defs := []*CustomFieldDefinition{}
 	err := s.Where("project_id = ?", projectID).Find(&defs)
 	return defs, err
+}
+
+// getCustomFieldDefinitionsByIDs loads definitions by their ids without an
+// archived filter: archived definitions must still describe retained values.
+// The query is chunked to stay bounded on large id sets.
+func getCustomFieldDefinitionsByIDs(s *xorm.Session, ids []int64) ([]*CustomFieldDefinition, error) {
+	defs := []*CustomFieldDefinition{}
+	const batchSize = 500
+	for chunk := range slices.Chunk(ids, batchSize) {
+		batch := []*CustomFieldDefinition{}
+		if err := s.In("id", chunk).Find(&batch); err != nil {
+			return nil, err
+		}
+		defs = append(defs, batch...)
+	}
+	return defs, nil
 }
 
 // lockCustomFieldDefinition serializes value-affecting operations on the

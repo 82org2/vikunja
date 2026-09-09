@@ -41,6 +41,7 @@ func (t *Task) CanCreate(s *xorm.Session, a web.Auth) (bool, error) {
 // CanRead determines if a user can read a task
 func (t *Task) CanRead(s *xorm.Session, a web.Auth) (canRead bool, maxPermission int, err error) {
 	expand := t.Expand
+	expandCustomFields := t.ExpandCustomFields
 	if err = t.resolveIDFromProjectAndIndex(s); err != nil {
 		return
 	}
@@ -50,6 +51,7 @@ func (t *Task) CanRead(s *xorm.Session, a web.Auth) (canRead bool, maxPermission
 	}
 
 	t.Expand = expand
+	t.ExpandCustomFields = expandCustomFields
 
 	// A user can read a task if it has access to the project
 	l := &Project{ID: t.ProjectID}

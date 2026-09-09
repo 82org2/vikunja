@@ -29,8 +29,35 @@ import (
 
 const taskListFilterDoc = "Filtering, sorting and search apply to every variant. See https://vikunja.io/docs/filters for the filter language."
 
+// customFieldsPtr makes the custom field values serialize as [] when the load
+// produced an empty slice (the expand was active but the task has no values),
+// and as an absent field when nothing was loaded (a non-nil pointer bypasses
+// omitempty; a nil slice header would otherwise be dropped too).
+func customFieldsPtr(fields []*models.TaskCustomFieldValueWithDefinition) *[]*models.TaskCustomFieldValueWithDefinition {
+	if fields == nil {
+		return nil
+	}
+	return &fields
+}
+
+// taskListItem is the list wire shape of a task: the model plus the custom field
+// values, which the shared model carries only in a json:"-" field so v1 stays
+// byte-identical. The CustomFields field here shadows the embedded one.
+type taskListItem struct {
+	models.Task
+	CustomFields *[]*models.TaskCustomFieldValueWithDefinition `json:"custom_fields,omitempty" readOnly:"true" doc:"The custom field values of this task, ordered by definition position. Present as [] when the expand option is requested but the task has none."`
+}
+
 type taskListBody struct {
-	Body Paginated[*models.Task]
+	Body Paginated[*taskListItem]
+}
+
+// bucketWithTasksItem wraps a bucket so its tasks can carry custom fields on the
+// buckets-with-tasks response. The outer Tasks field shadows models.Bucket.Tasks
+// with the same json key, keeping the wire shape stable.
+type bucketWithTasksItem struct {
+	models.Bucket
+	Tasks []*taskListItem `json:"tasks,omitempty"`
 }
 
 // bucketsWithTasksBody is the buckets-with-tasks response. It is not paginated:
@@ -38,8 +65,8 @@ type taskListBody struct {
 // page/per_page don't apply and total is simply the number of buckets.
 type bucketsWithTasksBody struct {
 	Body struct {
-		Items []*models.Bucket `json:"items"`
-		Total int64            `json:"total" doc:"The number of buckets returned."`
+		Items []*bucketWithTasksItem `json:"items"`
+		Total int64                  `json:"total" doc:"The number of buckets returned."`
 	}
 }
 
@@ -60,7 +87,7 @@ type TaskListQueryParams struct {
 	FilterIncludeNulls bool     `query:"filter_include_nulls" doc:"If true, also include tasks whose filtered field is null."`
 	SortBy             []string `query:"sort_by,explode" doc:"Fields to sort by (e.g. done, priority). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query)."`
 	OrderBy            []string `query:"order_by,explode" doc:"Sort order per sort_by field, asc or desc. Repeatable; defaults to asc."`
-	Expand             []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread" doc:"Embed extra, more expensive data per task. Repeatable."`
+	Expand             []string `query:"expand,explode" enum:"subtasks,buckets,reactions,comments,comment_count,time_entries_count,is_unread,custom_fields" doc:"Embed extra, more expensive data per task. Repeatable."`
 	Format             string   `query:"format" enum:"html,markdown" doc:"How rich-text fields are exchanged. See the API description."`
 }
 
@@ -108,7 +135,7 @@ func (in taskListViewInput) filters() taskListFilters {
 // the collection's Search field. forceFlat keeps a kanban view path returning
 // flat tasks; the buckets endpoint leaves it false for the polymorphic shape.
 func (f taskListFilters) collection(projectID, viewID int64, forceFlat bool) (*models.TaskCollection, error) {
-	expand, err := parseTaskExpand(f.Expand)
+	expand, expandCustomFields, err := parseTaskExpand(f.Expand)
 	if err != nil {
 		return nil, translateDomainError(err)
 	}
@@ -121,6 +148,7 @@ func (f taskListFilters) collection(projectID, viewID int64, forceFlat bool) (*m
 		SortBy:             f.SortBy,
 		OrderBy:            f.OrderBy,
 		Expand:             expand,
+		ExpandCustomFields: expandCustomFields,
 	}
 	if forceFlat {
 		tc.SetForceFlatTasks()
@@ -203,7 +231,11 @@ func readFlatTasks(ctx context.Context, f taskListFilters, page, perPage int, pr
 		return nil, fmt.Errorf("taskCollection.ReadAll returned unexpected type %T (expected []*models.Task)", result)
 	}
 	convertTasksToMarkdown(ctx, tasks...)
-	return &taskListBody{Body: NewPaginated(tasks, total, page, perPage)}, nil
+	items := make([]*taskListItem, 0, len(tasks))
+	for _, t := range tasks {
+		items = append(items, &taskListItem{Task: *t, CustomFields: customFieldsPtr(t.CustomFields)})
+	}
+	return &taskListBody{Body: NewPaginated(items, total, page, perPage)}, nil
 }
 
 func projectViewBucketsTasksList(ctx context.Context, in *taskListViewInput) (*bucketsWithTasksBody, error) {
@@ -235,8 +267,16 @@ func projectViewBucketsTasksList(ctx context.Context, in *taskListViewInput) (*b
 		bucketTasks = append(bucketTasks, bucket.Tasks...)
 	}
 	convertTasksToMarkdown(ctx, bucketTasks...)
+	items := make([]*bucketWithTasksItem, 0, len(buckets))
+	for _, b := range buckets {
+		tasks := make([]*taskListItem, 0, len(b.Tasks))
+		for _, t := range b.Tasks {
+			tasks = append(tasks, &taskListItem{Task: *t, CustomFields: customFieldsPtr(t.CustomFields)})
+		}
+		items = append(items, &bucketWithTasksItem{Bucket: *b, Tasks: tasks})
+	}
 	out := &bucketsWithTasksBody{}
-	out.Body.Items = buckets
+	out.Body.Items = items
 	out.Body.Total = total
 	return out, nil
 }

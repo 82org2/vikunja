@@ -49,6 +49,15 @@ func init() {
 			Method: "GET",
 		},
 	}
+	// custom_fields.read_all only ever gates the task-read expansion scope; no
+	// real route matches /custom-fields/*, so the pair cannot authorize a request
+	// by itself (mirrors the caldav/feeds virtual groups).
+	apiTokenRoutesV2["custom_fields"] = APITokenRoute{
+		"read_all": &RouteDetail{
+			Path:   "/custom-fields/*",
+			Method: "GET",
+		},
+	}
 }
 
 type APITokenRoute map[string]*RouteDetail
@@ -514,7 +523,7 @@ var expandScopeRoutes = map[string]bool{
 	"/api/v2/projects/:project/views/:view/buckets/tasks": true,
 }
 
-func requiredScopeForExpand(value string) (group, permission string, needsScope bool) {
+func requiredScopeForExpand(value, path string) (group, permission string, needsScope bool) {
 	switch TaskCollectionExpandable(value) {
 	case TaskCollectionExpandComments, TaskCollectionExpandCommentCount:
 		return "tasks_comments", "read_all", true
@@ -522,6 +531,12 @@ func requiredScopeForExpand(value string) (group, permission string, needsScope 
 		return "reactions", "read_all", true
 	case TaskCollectionExpandTimeEntriesCount:
 		return "time_entries", "read_all", true
+	case TaskCollectionExpandCustomFields:
+		// custom_fields is a v2-only expansion; v1 must not require its scope.
+		if !isV2Path(path) {
+			return "", "", false
+		}
+		return "custom_fields", "read_all", true
 	case TaskCollectionExpandSubtasks, TaskCollectionExpandBuckets, TaskCollectionExpandIsUnread:
 		return "", "", false
 	}
@@ -541,7 +556,7 @@ func expandScopesSatisfied(c *echo.Context, token *APIToken, path, method string
 
 	for _, raw := range rawExpands {
 		for _, value := range strings.Split(raw, ",") {
-			group, permission, needsScope := requiredScopeForExpand(value)
+			group, permission, needsScope := requiredScopeForExpand(value, path)
 			if !needsScope {
 				continue
 			}
@@ -567,6 +582,21 @@ func tokenHasPermission(token *APIToken, group, permission string) bool {
 		}
 	}
 	return false
+}
+
+// TokenHasPermission reports whether the API token carried in the echo context
+// holds the given (group, permission) scope. It returns false for any request
+// that is not authenticated with an API token, so callers must check for a
+// token separately when "no token" and "token without scope" must differ.
+func TokenHasPermission(ec *echo.Context, group, permission string) bool {
+	if ec == nil {
+		return false
+	}
+	token, ok := (*ec).Get("api_token").(*APIToken)
+	if !ok || token == nil {
+		return false
+	}
+	return tokenHasPermission(token, group, permission)
 }
 
 func PermissionsAreValid(permissions APIPermissions) (err error) {

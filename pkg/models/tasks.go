@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -161,6 +162,21 @@ type Task struct {
 
 	// Behaves exactly the same as with the TaskCollection.Expand parameter
 	Expand []TaskCollectionExpandable `xorm:"-" json:"-" query:"expand"`
+
+	// ExpandCustomFields is the v2-only signal to load custom field values. It is
+	// kept separate from Expand so the shared Validate() can keep rejecting
+	// custom_fields for v1, which must not execute the expansion.
+	ExpandCustomFields bool `xorm:"-" json:"-"`
+
+	// CustomFields holds the loaded custom field values of this task, ordered by
+	// definition position. Populated by the custom_fields expand; exposed by the
+	// v2 response wrappers, never serialized here (v1 must not see it).
+	CustomFields []*TaskCustomFieldValueWithDefinition `xorm:"-" json:"-"`
+
+	// ProjectUpdated is the parent project's Updated timestamp, captured while
+	// loading the task so the v2 single-task ETag can fold in project-level
+	// changes (definition and option edits bump the project timestamp).
+	ProjectUpdated time.Time `xorm:"-" json:"-"`
 
 	// The position of the task - any task project can be sorted as usual by this parameter.
 	// When accessing tasks via views with buckets, this is primarily used to sort them based on a range.
@@ -798,10 +814,19 @@ func addMoreInfoToTasks(s *xorm.Session, taskMap map[int64]*Task, a web.Auth, vi
 				if err != nil {
 					return
 				}
+			case TaskCollectionExpandCustomFields:
+				err = addCustomFieldsToTasks(s, taskIDs, taskMap)
+				if err != nil {
+					return err
+				}
 			}
 			expanded[expandable] = true
 		}
 	}
+
+	// The project timestamp is only captured when custom fields are loaded: the
+	// v2 single-task ETag folds it in when the response carries values.
+	loadCustomFields := slices.Contains(expand, TaskCollectionExpandCustomFields)
 
 	// Add all objects to their tasks
 	for _, task := range taskMap {
@@ -819,6 +844,12 @@ func addMoreInfoToTasks(s *xorm.Session, taskMap map[int64]*Task, a web.Auth, vi
 
 		// Build the task identifier from the project identifier and task index
 		task.setIdentifier(projects[task.ProjectID])
+
+		if loadCustomFields {
+			if project, has := projects[task.ProjectID]; has && project != nil {
+				task.ProjectUpdated = project.Updated
+			}
+		}
 
 		task.IsFavorite = taskFavorites[task.ID]
 
@@ -2282,6 +2313,8 @@ func GetDeletedTasksSince(s *xorm.Session, projectID int64, since time.Time) (ta
 func (t *Task) ReadOne(s *xorm.Session, a web.Auth) (err error) {
 
 	expand := t.Expand
+	// Captured before the row overwrite below, which resets the struct.
+	expandCustomFields := t.ExpandCustomFields
 	if err = t.resolveIDFromProjectAndIndex(s); err != nil {
 		return
 	}
@@ -2297,6 +2330,11 @@ func (t *Task) ReadOne(s *xorm.Session, a web.Auth) (err error) {
 		if err != nil {
 			return
 		}
+	}
+	// custom_fields is v2-only and not a valid shared expand value, so it is
+	// appended here, after validation, when the v2 layer signalled it.
+	if expandCustomFields {
+		expand = append(expand, TaskCollectionExpandCustomFields)
 	}
 
 	err = addMoreInfoToTasks(s, taskMap, a, nil, expand)

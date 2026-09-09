@@ -3306,3 +3306,32 @@ func (err ErrInvalidCustomFieldOption) HTTPError() web.HTTPError {
 		Message:  err.Message,
 	}
 }
+
+// ErrCustomFieldDefinitionHasValues represents an error where permanently
+// deleting a definition was requested while it still holds task values without
+// the caller explicitly accepting their deletion.
+type ErrCustomFieldDefinitionHasValues struct {
+	DefinitionID int64
+}
+
+// IsErrCustomFieldDefinitionHasValues checks if an error is a ErrCustomFieldDefinitionHasValues.
+func IsErrCustomFieldDefinitionHasValues(err error) bool {
+	_, ok := err.(ErrCustomFieldDefinitionHasValues)
+	return ok
+}
+
+func (err ErrCustomFieldDefinitionHasValues) Error() string {
+	return fmt.Sprintf("Custom field definition has values [DefinitionID: %d]", err.DefinitionID)
+}
+
+// ErrCodeCustomFieldDefinitionHasValues holds the unique world-error code of this error
+const ErrCodeCustomFieldDefinitionHasValues = 19517
+
+// HTTPError holds the http error description
+func (err ErrCustomFieldDefinitionHasValues) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusConflict,
+		Code:     ErrCodeCustomFieldDefinitionHasValues,
+		Message:  "This custom field definition still has values. Delete them with delete_values=true before permanently deleting the definition.",
+	}
+}

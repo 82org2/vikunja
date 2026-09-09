@@ -188,8 +188,14 @@ func TestCustomFieldValueValidate(t *testing.T) {
 	})
 
 	t.Run("multi select", func(t *testing.T) {
+		// An explicit empty selection represents "unset" on the wire and is legal
+		// as a request; the setter deletes the row instead of storing it.
 		v := &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}}
-		require.Error(t, v.validate()) // empty is unset, not a value
+		require.NoError(t, v.validate())
+
+		// Omitting option_ids entirely is still rejected: "exactly one value".
+		v = &CustomFieldValue{Type: CustomFieldTypeMultiSelect}
+		require.Error(t, v.validate())
 
 		v = &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{1, 2}}
 		require.NoError(t, v.validate())

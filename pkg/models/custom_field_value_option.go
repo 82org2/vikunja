@@ -43,15 +43,31 @@ func (*CustomFieldValueOption) TableName() string {
 
 func getOptionIDsForValue(s *xorm.Session, valueID int64) ([]int64, error) {
 	rows := []*CustomFieldValueOption{}
-	err := s.Where("value_id = ?", valueID).OrderBy("id ASC").Find(&rows)
+	err := s.Where("value_id = ?", valueID).Find(&rows)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.OptionID)
+	if len(rows) == 0 {
+		return []int64{}, nil
 	}
-	return ids, nil
+
+	optionIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		optionIDs = append(optionIDs, row.OptionID)
+	}
+
+	// Response order follows option position, not insertion order, per the
+	// CustomFieldOption.Position contract; id breaks ties deterministically.
+	options := []*CustomFieldOption{}
+	if err = s.In("id", optionIDs).OrderBy("position asc, id asc").Find(&options); err != nil {
+		return nil, err
+	}
+
+	ordered := make([]int64, 0, len(options))
+	for _, opt := range options {
+		ordered = append(ordered, opt.ID)
+	}
+	return ordered, nil
 }
 
 // --- write path ---

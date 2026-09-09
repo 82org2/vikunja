@@ -34,3 +34,17 @@
   position: 3
   updated: 2018-12-02 15:13:12
   created: 2018-12-01 15:13:12
+- id: 6
+  definition_id: 8
+  machine_key: cat1
+  label: Category One
+  position: 1
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12
+- id: 7
+  definition_id: 10
+  machine_key: lead1
+  label: Lead One
+  position: 1
+  updated: 2018-12-02 15:13:12
+  created: 2018-12-01 15:13:12

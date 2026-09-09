@@ -32,7 +32,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 1)
+		def, err := GetCustomFieldDefinitionByID(s, 1)
 		require.NoError(t, err)
 
 		number := &CustomFieldNumber{}
@@ -53,7 +53,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 1)
+		def, err := GetCustomFieldDefinitionByID(s, 1)
 		require.NoError(t, err)
 
 		// task 1 already has value_number 75 for definition 1; writing -25 must replace it.
@@ -76,7 +76,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 4)
+		def, err := GetCustomFieldDefinitionByID(s, 4)
 		require.NoError(t, err)
 
 		// task 2 already has tags [3, 4] through value id 7; replacing drops option 4.
@@ -100,7 +100,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 1) // number
+		def, err := GetCustomFieldDefinitionByID(s, 1) // number
 		require.NoError(t, err)
 
 		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeBoolean, Boolean: boolPtr(true)})
@@ -112,7 +112,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 7) // project 2
+		def, err := GetCustomFieldDefinitionByID(s, 7) // project 2
 		require.NoError(t, err)
 		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeShortText, ShortText: strPtr("nope")})
 		require.Error(t, err)
@@ -123,7 +123,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 5)
+		def, err := GetCustomFieldDefinitionByID(s, 5)
 		require.NoError(t, err)
 		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeBoolean, Boolean: boolPtr(true)})
 		require.Error(t, err)
@@ -134,7 +134,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 4)
+		def, err := GetCustomFieldDefinitionByID(s, 4)
 		require.NoError(t, err)
 		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}})
 		require.NoError(t, err)
@@ -305,12 +305,12 @@ func TestTaskCustomFieldValueFromRow(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 1)
+		def, err := GetCustomFieldDefinitionByID(s, 1)
 		require.NoError(t, err)
-		row, err := getCustomFieldValue(s, 1, 1)
+		row, err := GetCustomFieldValue(s, 1, 1)
 		require.NoError(t, err)
 
-		val, err := row.fromRow(s, def)
+		val, err := row.FromRow(s, def)
 		require.NoError(t, err)
 		require.Equal(t, CustomFieldTypeNumber, val.Type)
 		require.NotNil(t, val.Number)
@@ -318,19 +318,27 @@ func TestTaskCustomFieldValueFromRow(t *testing.T) {
 		require.Equal(t, 1, val.Number.Precision)
 	})
 
-	t.Run("multi select loads memberships in insertion order", func(t *testing.T) {
+	t.Run("multi select loads memberships in option position order", func(t *testing.T) {
 		db.LoadAndAssertFixtures(t)
 		s := db.NewSession()
 		defer s.Close()
 
-		def, err := getCustomFieldDefinitionByID(s, 4)
+		// The fixture inserts option 3 before option 4. Flip their positions so
+		// the response order can only come from the option position, not the
+		// membership insertion order.
+		_, err := s.ID(3).Cols("position").Update(&CustomFieldOption{Position: 2})
 		require.NoError(t, err)
-		row, err := getCustomFieldValue(s, 2, 4)
+		_, err = s.ID(4).Cols("position").Update(&CustomFieldOption{Position: 1})
 		require.NoError(t, err)
 
-		val, err := row.fromRow(s, def)
+		def, err := GetCustomFieldDefinitionByID(s, 4)
+		require.NoError(t, err)
+		row, err := GetCustomFieldValue(s, 2, 4)
+		require.NoError(t, err)
+
+		val, err := row.FromRow(s, def)
 		require.NoError(t, err)
 		require.Equal(t, CustomFieldTypeMultiSelect, val.Type)
-		require.Equal(t, []int64{3, 4}, val.OptionIDs)
+		require.Equal(t, []int64{4, 3}, val.OptionIDs)
 	})
 }

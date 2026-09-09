@@ -25,10 +25,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"code.vikunja.io/api/pkg/db"
 	"code.vikunja.io/api/pkg/user"
 	"code.vikunja.io/api/pkg/web"
 	"xorm.io/builder"
 	"xorm.io/xorm"
+	"xorm.io/xorm/schemas"
 )
 
 // CustomFieldDefinition describes one project-scoped custom field: its
@@ -50,6 +52,10 @@ type CustomFieldDefinition struct {
 	ShowOnCard  bool    `xorm:"not null default false" json:"show_on_card" doc:"Whether values of this field are shown on task cards."`
 	ShowInTable bool    `xorm:"not null default false" json:"show_in_table" doc:"Whether this field is offered as a table column in views."`
 
+	// IncludeArchived asks a ReadAll to include archived definitions in the
+	// result. It is a query-carried flag, never stored on the row.
+	IncludeArchived bool `xorm:"-" json:"-"`
+
 	Configuration *CustomFieldConfiguration `xorm:"json null default null" json:"configuration,omitempty" doc:"The validated, canonicalised per-type configuration, at most 16 KiB. Only number fields carry settings (precision plus optional min, max, step, and display unit)."`
 
 	DefaultValue *CustomFieldValue `xorm:"json null default null" json:"default_value,omitempty" doc:"A validated default value, materialised into a regular value row when a new task is created. Changing it is not retroactive and unsetting a task value does not reapply it."`
@@ -70,11 +76,11 @@ type CustomFieldConfiguration struct {
 	// Number fields: precision 0-6 plus optional minimum, maximum, and step as
 	// exact decimal literals (compared at the definition's precision) and a
 	// display unit.
-	Precision *int    `json:"precision,omitempty"`
-	Min       *string `json:"min,omitempty"`
-	Max       *string `json:"max,omitempty"`
-	Step      *string `json:"step,omitempty"`
-	Unit      string  `json:"unit,omitempty"`
+	Precision *int    `json:"precision,omitempty" doc:"Number precision, 0-6 fractional digits and the scaling applied to stored values."`
+	Min       *string `json:"min,omitempty" doc:"Optional fixed-point minimum for number values, exact at the definition's precision."`
+	Max       *string `json:"max,omitempty" doc:"Optional fixed-point maximum for number values, exact at the definition's precision."`
+	Step      *string `json:"step,omitempty" doc:"Optional positive fixed-point step for number values, exact at the definition's precision."`
+	Unit      string  `json:"unit,omitempty" doc:"Optional display unit for number values."`
 }
 
 func (c *CustomFieldConfiguration) UnmarshalJSON(data []byte) error {
@@ -166,7 +172,7 @@ func customFieldNumberErrorMessage(err error) string {
 
 // --- reads ---
 
-func getCustomFieldDefinitionByID(s *xorm.Session, id int64) (*CustomFieldDefinition, error) {
+func GetCustomFieldDefinitionByID(s *xorm.Session, id int64) (*CustomFieldDefinition, error) {
 	def := &CustomFieldDefinition{}
 	exists, err := s.Where("id = ?", id).Get(def)
 	if err != nil {
@@ -178,10 +184,222 @@ func getCustomFieldDefinitionByID(s *xorm.Session, id int64) (*CustomFieldDefini
 	return def, nil
 }
 
+// GetCustomFieldDefinitionByIDAndProject loads a definition only when it belongs
+// to the given project; any other id resolves to ErrCustomFieldDefinitionDoesNotExist
+// so a path scoped to the wrong parent project fails as not found, not forbidden.
+func GetCustomFieldDefinitionByIDAndProject(s *xorm.Session, defID, projectID int64) (def *CustomFieldDefinition, err error) {
+	def = &CustomFieldDefinition{}
+	exists, err := s.
+		Where("id = ? AND project_id = ?", defID, projectID).
+		NoAutoCondition().
+		Get(def)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrCustomFieldDefinitionDoesNotExist{DefinitionID: defID}
+	}
+	return def, nil
+}
+
 func getCustomFieldDefinitionsForProject(s *xorm.Session, projectID int64) ([]*CustomFieldDefinition, error) {
 	defs := []*CustomFieldDefinition{}
 	err := s.Where("project_id = ?", projectID).Find(&defs)
 	return defs, err
+}
+
+// lockCustomFieldDefinition serializes value-affecting operations on the
+// definition row without touching any timestamp: value writes, definition
+// updates, archiving, and permanent deletion all take this lock before
+// inspecting or changing values. PostgreSQL/MySQL use SELECT ... FOR UPDATE;
+// SQLite has no FOR UPDATE, so a no-op write takes the database write lock as
+// the first statement (avoiding a stale-snapshot read→write upgrade).
+func lockCustomFieldDefinition(s *xorm.Session, defID int64) error {
+	if db.Type() == schemas.SQLITE {
+		// NoAutoTime keeps the no-op write from auto-filling the updated column.
+		_, err := s.NoAutoTime().ID(defID).Cols("id").Update(&CustomFieldDefinition{ID: defID})
+		return err
+	}
+	_, err := s.ForUpdate().Where("id = ?", defID).Get(&CustomFieldDefinition{})
+	return err
+}
+
+// --- permissions ---
+
+// CanRead lets any project reader see the active definitions of the project.
+// Project.CanRead already resolves link shares and instance-admin bypass, so the
+// wiki's link-share behaviour follows for free.
+func (d *CustomFieldDefinition) CanRead(s *xorm.Session, a web.Auth) (bool, int, error) {
+	// Resolve the parent first so a wrong-project path is a 404 even for an
+	// instance administrator.
+	existing, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if isInstanceAdmin(s, a) {
+		return true, int(PermissionAdmin), nil
+	}
+
+	return (&Project{ID: existing.ProjectID}).CanRead(s, a)
+}
+
+// CanCreate gates definition management behind project admin, matching the wiki:
+// "Project administrators manage definitions and options."
+func (d *CustomFieldDefinition) CanCreate(s *xorm.Session, a web.Auth) (bool, error) {
+	if isInstanceAdmin(s, a) {
+		return true, nil
+	}
+	return (&Project{ID: d.ProjectID}).IsAdmin(s, a)
+}
+
+func (d *CustomFieldDefinition) CanUpdate(s *xorm.Session, a web.Auth) (bool, error) {
+	// Reject a definition that is not in the path project before authorizing
+	// against it: an admin of the path project must not mutate another project's
+	// definition under that path, and the parent check applies to instance
+	// administrators too.
+	existing, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
+	if err != nil {
+		return false, err
+	}
+
+	if isInstanceAdmin(s, a) {
+		return true, nil
+	}
+	return (&Project{ID: existing.ProjectID}).IsAdmin(s, a)
+}
+
+func (d *CustomFieldDefinition) CanDelete(s *xorm.Session, a web.Auth) (bool, error) {
+	return d.CanUpdate(s, a)
+}
+
+// --- CRUD ---
+
+func (d *CustomFieldDefinition) ReadOne(s *xorm.Session, _ web.Auth) (err error) {
+	def, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
+	if err != nil {
+		return err
+	}
+	*d = *def
+	return
+}
+
+// ReadAll lists the definitions of one project. Archived definitions are hidden
+// unless d.IncludeArchived is set; the route feeds that flag from a query param.
+func (d *CustomFieldDefinition) ReadAll(s *xorm.Session, a web.Auth, search string, page, perPage int) (result interface{}, resultCount int, numberOfTotalItems int64, err error) {
+	can, _, err := (&Project{ID: d.ProjectID}).CanRead(s, a)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if !can {
+		return nil, 0, 0, ErrGenericForbidden{}
+	}
+
+	cond := builder.NewCond()
+	cond = cond.And(builder.Eq{"project_id": d.ProjectID})
+	if !d.IncludeArchived {
+		cond = cond.And(builder.Eq{"is_archived": false})
+	}
+	if search != "" {
+		cond = cond.And(builder.Or(
+			builder.Like{"title", search},
+			builder.Like{"machine_key", search},
+		))
+	}
+
+	totalCount, err := s.Where(cond).Count(&CustomFieldDefinition{})
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	limit, start := getLimitFromPageIndex(page, perPage)
+	query := s.Where(cond).OrderBy("position asc")
+	if limit > 0 {
+		query = query.Limit(limit, start)
+	}
+	defs := []*CustomFieldDefinition{}
+	if err = query.Find(&defs); err != nil {
+		return nil, 0, 0, err
+	}
+
+	return defs, len(defs), totalCount, nil
+}
+
+// Delete archives the definition rather than removing the row, so retained
+// values and options keep being describable. Idempotent.
+func (d *CustomFieldDefinition) Delete(s *xorm.Session, _ web.Auth) (err error) {
+	if err = lockCustomFieldDefinition(s, d.ID); err != nil {
+		return err
+	}
+	existing, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
+	if err != nil {
+		return err
+	}
+	if existing.IsArchived {
+		return nil
+	}
+
+	if _, err = s.ID(d.ID).Cols("is_archived", "updated").Update(&CustomFieldDefinition{IsArchived: true}); err != nil {
+		return err
+	}
+	return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
+}
+
+// DeletePermanently removes the definition together with its values, options,
+// and multi-select memberships. Populated definitions return a conflict unless
+// deleteValues is set, which is how the API surfaces the confirmed destructive
+// action. Cleanup order follows the wiki: memberships, values, options, definition.
+func (d *CustomFieldDefinition) DeletePermanently(s *xorm.Session, deleteValues bool) (err error) {
+	existing, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	// Lock the definition row so a concurrent value write (which takes the same
+	// lock) cannot insert a value for this definition while it is being deleted.
+	if err = lockCustomFieldDefinition(s, d.ID); err != nil {
+		return err
+	}
+
+	count, err := s.Where("definition_id = ?", d.ID).Count(&TaskCustomFieldValue{})
+	if err != nil {
+		return err
+	}
+	if count > 0 && !deleteValues {
+		return ErrCustomFieldDefinitionHasValues{DefinitionID: d.ID}
+	}
+
+	// Delete memberships and values in bounded batches so a project at the
+	// documented limits never builds an oversized IN list.
+	const batchSize = 500
+	for {
+		rows := []*TaskCustomFieldValue{}
+		if err = s.Where("definition_id = ?", d.ID).Limit(batchSize).Cols("id").Find(&rows); err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		ids := make([]int64, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		if _, err = s.In("value_id", ids).Delete(&CustomFieldValueOption{}); err != nil {
+			return err
+		}
+		if _, err = s.In("id", ids).Delete(&TaskCustomFieldValue{}); err != nil {
+			return err
+		}
+	}
+
+	if _, err = s.Where("definition_id = ?", d.ID).Delete(&CustomFieldOption{}); err != nil {
+		return err
+	}
+	if _, err = s.Where("id = ?", d.ID).Delete(&CustomFieldDefinition{}); err != nil {
+		return err
+	}
+
+	return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
 }
 
 // --- write path ---
@@ -241,6 +459,14 @@ func (d *CustomFieldDefinition) Create(s *xorm.Session, _ web.Auth) (err error) 
 		return err
 	}
 
+	exists, err := s.Where("project_id = ? AND machine_key = ?", d.ProjectID, d.MachineKey).Exist(&CustomFieldDefinition{})
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrInvalidCustomFieldDefinition{Message: "A definition with this machine key already exists in this project."}
+	}
+
 	count, err := s.Where("project_id = ?", d.ProjectID).Count(&CustomFieldDefinition{})
 	if err != nil {
 		return err
@@ -266,7 +492,13 @@ func (d *CustomFieldDefinition) Create(s *xorm.Session, _ web.Auth) (err error) 
 // and field type are immutable, and new numeric constraints must remain valid
 // for every stored value.
 func (d *CustomFieldDefinition) Update(s *xorm.Session, _ web.Auth) (err error) {
-	existing, err := getCustomFieldDefinitionByID(s, d.ID)
+	// Lock the definition row before validating the new configuration against
+	// stored values, so a concurrent value write cannot commit a value that
+	// violates the constraints being applied.
+	if err = lockCustomFieldDefinition(s, d.ID); err != nil {
+		return err
+	}
+	existing, err := GetCustomFieldDefinitionByID(s, d.ID)
 	if err != nil {
 		return err
 	}
@@ -428,7 +660,7 @@ func validateURLValue(raw string) error {
 // options can no longer be selected but continue to describe retained values,
 // which is why this check runs at set time and not when loading values.
 func validateOptionValue(s *xorm.Session, optionID int64, def *CustomFieldDefinition) error {
-	opt, err := getCustomFieldOptionByID(s, optionID)
+	opt, err := GetCustomFieldOptionByID(s, optionID)
 	if err != nil {
 		return err
 	}

@@ -22,6 +22,7 @@ import (
 
 	"code.vikunja.io/api/pkg/utils"
 	"code.vikunja.io/api/pkg/web"
+	"xorm.io/builder"
 	"xorm.io/xorm"
 )
 
@@ -41,6 +42,15 @@ type CustomFieldOption struct {
 	IsArchived bool    `xorm:"not null default false index(definition_is_archived_position)" json:"is_archived" doc:"Whether this option is archived. Archived options can no longer be selected but continue to describe retained values."`
 	Position   float64 `xorm:"double null index(definition_is_archived_position)" json:"position" doc:"The position of this option, controlling display and multi-select response order."`
 
+	// IncludeArchived asks a ReadAll to include archived options. Query-carried
+	// flag, never stored.
+	IncludeArchived bool `xorm:"-" json:"-"`
+
+	// ProjectID is the path-project scope for permission checks. Options inherit
+	// their project through the definition, so this is never stored: the route
+	// sets it from the /projects/{project}/... path before calling Can*.
+	ProjectID int64 `xorm:"-" json:"-"`
+
 	Created time.Time `xorm:"created not null" json:"created" readOnly:"true" doc:"A timestamp when this option was created. You cannot change this value."`
 	Updated time.Time `xorm:"updated not null" json:"updated" readOnly:"true" doc:"A timestamp when this option was last updated. You cannot change this value."`
 }
@@ -50,7 +60,7 @@ func (*CustomFieldOption) TableName() string {
 	return "custom_field_options"
 }
 
-func getCustomFieldOptionByID(s *xorm.Session, id int64) (*CustomFieldOption, error) {
+func GetCustomFieldOptionByID(s *xorm.Session, id int64) (*CustomFieldOption, error) {
 	opt := &CustomFieldOption{}
 	exists, err := s.Where("id = ?", id).Get(opt)
 	if err != nil {
@@ -60,6 +70,147 @@ func getCustomFieldOptionByID(s *xorm.Session, id int64) (*CustomFieldOption, er
 		return nil, ErrCustomFieldOptionDoesNotExist{OptionID: id}
 	}
 	return opt, nil
+}
+
+// loadCustomFieldOptionWithDefinition resolves an option only when it belongs to
+// the definition in the path and that definition to the project in the path.
+// Any mismatch resolves to a not-found error so a wrong-parent path never leaks
+// existence across projects.
+func loadCustomFieldOptionWithDefinition(s *xorm.Session, optionID, definitionID, projectID int64) (*CustomFieldOption, *CustomFieldDefinition, error) {
+	opt, err := GetCustomFieldOptionByID(s, optionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if opt.DefinitionID != definitionID {
+		return nil, nil, ErrCustomFieldOptionDoesNotExist{OptionID: optionID}
+	}
+	def, err := GetCustomFieldDefinitionByID(s, opt.DefinitionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if def.ProjectID != projectID {
+		return nil, nil, ErrCustomFieldOptionDoesNotExist{OptionID: optionID}
+	}
+	return opt, def, nil
+}
+
+// --- permissions ---
+
+func (opt *CustomFieldOption) CanRead(s *xorm.Session, a web.Auth) (bool, int, error) {
+	// Resolve the parent first so a wrong-project path is a 404 even for an
+	// instance administrator.
+	_, def, err := loadCustomFieldOptionWithDefinition(s, opt.ID, opt.DefinitionID, opt.ProjectID)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if isInstanceAdmin(s, a) {
+		return true, int(PermissionAdmin), nil
+	}
+	return (&Project{ID: def.ProjectID}).CanRead(s, a)
+}
+
+func (opt *CustomFieldOption) CanCreate(s *xorm.Session, a web.Auth) (bool, error) {
+	def, err := GetCustomFieldDefinitionByIDAndProject(s, opt.DefinitionID, opt.ProjectID)
+	if err != nil {
+		return false, err
+	}
+
+	if isInstanceAdmin(s, a) {
+		return true, nil
+	}
+	return (&Project{ID: def.ProjectID}).IsAdmin(s, a)
+}
+
+func (opt *CustomFieldOption) CanUpdate(s *xorm.Session, a web.Auth) (bool, error) {
+	_, def, err := loadCustomFieldOptionWithDefinition(s, opt.ID, opt.DefinitionID, opt.ProjectID)
+	if err != nil {
+		return false, err
+	}
+
+	if isInstanceAdmin(s, a) {
+		return true, nil
+	}
+	return (&Project{ID: def.ProjectID}).IsAdmin(s, a)
+}
+
+func (opt *CustomFieldOption) CanDelete(s *xorm.Session, a web.Auth) (bool, error) {
+	return opt.CanUpdate(s, a)
+}
+
+// --- CRUD ---
+
+func (opt *CustomFieldOption) ReadOne(s *xorm.Session, _ web.Auth) (err error) {
+	stored, _, err := loadCustomFieldOptionWithDefinition(s, opt.ID, opt.DefinitionID, opt.ProjectID)
+	if err != nil {
+		return err
+	}
+	*opt = *stored
+	return
+}
+
+// ReadAll lists the options of one definition. Archived options are hidden
+// unless opt.IncludeArchived is set.
+func (opt *CustomFieldOption) ReadAll(s *xorm.Session, a web.Auth, search string, page, perPage int) (result interface{}, resultCount int, numberOfTotalItems int64, err error) {
+	def, err := GetCustomFieldDefinitionByIDAndProject(s, opt.DefinitionID, opt.ProjectID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	can, _, err := (&Project{ID: def.ProjectID}).CanRead(s, a)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if !can {
+		return nil, 0, 0, ErrGenericForbidden{}
+	}
+
+	cond := builder.NewCond()
+	cond = cond.And(builder.Eq{"definition_id": opt.DefinitionID})
+	if !opt.IncludeArchived {
+		cond = cond.And(builder.Eq{"is_archived": false})
+	}
+	if search != "" {
+		cond = cond.And(builder.Or(
+			builder.Like{"label", search},
+			builder.Like{"machine_key", search},
+		))
+	}
+
+	totalCount, err := s.Where(cond).Count(&CustomFieldOption{})
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	limit, start := getLimitFromPageIndex(page, perPage)
+	query := s.Where(cond).OrderBy("position asc")
+	if limit > 0 {
+		query = query.Limit(limit, start)
+	}
+	options := []*CustomFieldOption{}
+	if err = query.Find(&options); err != nil {
+		return nil, 0, 0, err
+	}
+	return options, len(options), totalCount, nil
+}
+
+// Delete archives the option rather than removing the row: referenced options
+// continue to describe retained values. Idempotent.
+func (opt *CustomFieldOption) Delete(s *xorm.Session, _ web.Auth) (err error) {
+	if err = lockCustomFieldDefinition(s, opt.DefinitionID); err != nil {
+		return err
+	}
+	stored, def, err := loadCustomFieldOptionWithDefinition(s, opt.ID, opt.DefinitionID, opt.ProjectID)
+	if err != nil {
+		return err
+	}
+	if stored.IsArchived {
+		return nil
+	}
+
+	if _, err = s.ID(opt.ID).Cols("is_archived", "updated").Update(&CustomFieldOption{IsArchived: true}); err != nil {
+		return err
+	}
+	return updateProjectLastUpdated(s, &Project{ID: def.ProjectID})
 }
 
 func (opt *CustomFieldOption) validate() error {
@@ -82,7 +233,12 @@ func (opt *CustomFieldOption) Create(s *xorm.Session, _ web.Auth) (err error) {
 		return err
 	}
 
-	def, err := getCustomFieldDefinitionByID(s, opt.DefinitionID)
+	// Lock the definition row so a concurrent permanent-delete cannot remove the
+	// definition between the load below and the option insert.
+	if err = lockCustomFieldDefinition(s, opt.DefinitionID); err != nil {
+		return err
+	}
+	def, err := GetCustomFieldDefinitionByID(s, opt.DefinitionID)
 	if err != nil {
 		return err
 	}
@@ -91,6 +247,14 @@ func (opt *CustomFieldOption) Create(s *xorm.Session, _ web.Auth) (err error) {
 	}
 	if err = updateProjectLastUpdated(s, &Project{ID: def.ProjectID}); err != nil {
 		return err
+	}
+
+	exists, err := s.Where("definition_id = ? AND machine_key = ?", opt.DefinitionID, opt.MachineKey).Exist(&CustomFieldOption{})
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrInvalidCustomFieldOption{Message: "An option with this machine key already exists in this definition."}
 	}
 
 	count, err := s.Where("definition_id = ?", opt.DefinitionID).Count(&CustomFieldOption{})
@@ -116,7 +280,10 @@ func (opt *CustomFieldOption) Create(s *xorm.Session, _ web.Auth) (err error) {
 
 // Update edits the editable fields of an option. The machine key is immutable.
 func (opt *CustomFieldOption) Update(s *xorm.Session, _ web.Auth) (err error) {
-	existing, err := getCustomFieldOptionByID(s, opt.ID)
+	if err = lockCustomFieldDefinition(s, opt.DefinitionID); err != nil {
+		return err
+	}
+	existing, err := GetCustomFieldOptionByID(s, opt.ID)
 	if err != nil {
 		return err
 	}
@@ -140,7 +307,7 @@ func (opt *CustomFieldOption) Update(s *xorm.Session, _ web.Auth) (err error) {
 		return err
 	}
 
-	def, err := getCustomFieldDefinitionByID(s, opt.DefinitionID)
+	def, err := GetCustomFieldDefinitionByID(s, opt.DefinitionID)
 	if err != nil {
 		return err
 	}

@@ -18,8 +18,10 @@ package models
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
+	"code.vikunja.io/api/pkg/web"
 	"xorm.io/xorm"
 )
 
@@ -58,7 +60,7 @@ func (*TaskCustomFieldValue) TableName() string {
 
 // --- reads ---
 
-func getCustomFieldValue(s *xorm.Session, taskID, definitionID int64) (*TaskCustomFieldValue, error) {
+func GetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) (*TaskCustomFieldValue, error) {
 	v := &TaskCustomFieldValue{}
 	exists, err := s.Where("task_id = ? AND definition_id = ?", taskID, definitionID).Get(v)
 	if err != nil {
@@ -68,6 +70,13 @@ func getCustomFieldValue(s *xorm.Session, taskID, definitionID int64) (*TaskCust
 		return nil, ErrCustomFieldValueDoesNotExist{ValueID: definitionID}
 	}
 	return v, nil
+}
+
+// CanWriteCustomFieldValue reports whether the auth may set or unset a value on
+// the task. It delegates to Task.CanWrite, which resolves the task's project and
+// checks project write permission, covering users and write-admin link shares.
+func CanWriteCustomFieldValue(s *xorm.Session, taskID int64, a web.Auth) (bool, error) {
+	return (&Task{ID: taskID}).CanWrite(s, a)
 }
 
 // --- write path ---
@@ -83,7 +92,14 @@ func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefiniti
 		return ErrInvalidCustomFieldValue{Message: "A custom field definition is required."}
 	}
 
-	persistedDef, err := getCustomFieldDefinitionByID(s, def.ID)
+	// Lock the definition row so a concurrent permanent-delete or definition
+	// update cannot interleave: whichever side holds the lock first wins, and the
+	// loser sees the definition gone (or the new value included in the deletion
+	// and validated against the new constraints).
+	if err := lockCustomFieldDefinition(s, def.ID); err != nil {
+		return err
+	}
+	persistedDef, err := GetCustomFieldDefinitionByID(s, def.ID)
 	if err != nil {
 		return err
 	}
@@ -98,14 +114,18 @@ func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefiniti
 		return ErrInvalidCustomFieldValue{Message: "Archived custom field definitions cannot receive new values."}
 	}
 
-	if value.Type == CustomFieldTypeMultiSelect && value.OptionIDs != nil && len(value.OptionIDs) == 0 && value.populatedFields() == 0 {
-		return UnsetCustomFieldValue(s, taskID, persistedDef.ID)
-	}
 	if err := value.validate(); err != nil {
 		return err
 	}
 	if err := validateValueAgainstDefinition(s, value, persistedDef); err != nil {
 		return err
+	}
+
+	// An empty multi-select value means "unset": delete the row instead of
+	// storing it. This runs after the definition checks so a number, foreign, or
+	// nonexistent definition fails the normal validation first.
+	if value.Type == CustomFieldTypeMultiSelect && value.OptionIDs != nil && len(value.OptionIDs) == 0 && value.populatedFields() == 0 {
+		return UnsetCustomFieldValue(s, taskID, persistedDef.ID)
 	}
 
 	row, err := value.toRow(taskID, persistedDef.ID)
@@ -179,7 +199,7 @@ func isStaleCustomFieldDefaultError(err error, fieldType CustomFieldType) bool {
 // UnsetCustomFieldValue removes the value row and its memberships. Unsetting a
 // field that has no row is a no-op, matching the idempotent unset contract.
 func UnsetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) error {
-	row, err := getCustomFieldValue(s, taskID, definitionID)
+	row, err := GetCustomFieldValue(s, taskID, definitionID)
 	if err != nil {
 		if IsErrCustomFieldValueDoesNotExist(err) {
 			return nil
@@ -235,41 +255,107 @@ func (v *CustomFieldValue) toRow(taskID, definitionID int64) (*TaskCustomFieldVa
 	return row, err
 }
 
-// fromRow reconstructs the discriminated value from the row, loading memberships
-// for multi-select values.
-func (v *TaskCustomFieldValue) fromRow(s *xorm.Session, def *CustomFieldDefinition) (*CustomFieldValue, error) {
+// FromRow reconstructs the discriminated value from a stored row, loading
+// memberships for multi-select values. Rows are trusted only after checking the
+// exactly-one-typed-column invariant: a malformed row must fail loudly here
+// instead of panicking on a nil dereference or decoding into the wrong shape.
+func (v *TaskCustomFieldValue) FromRow(s *xorm.Session, def *CustomFieldDefinition) (*CustomFieldValue, error) {
+	populated := v.populatedStoredFields()
+	if populated > 1 {
+		return nil, ErrInvalidCustomFieldValue{Message: "The stored custom field value row has more than one populated typed column."}
+	}
+
 	value := &CustomFieldValue{Type: def.FieldType}
 
 	switch def.FieldType {
 	case CustomFieldTypeShortText:
+		if v.ValueShortText == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.ShortText = v.ValueShortText
 	case CustomFieldTypeLongText:
+		if v.ValueLongText == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.LongText = v.ValueLongText
 	case CustomFieldTypeNumber:
+		if v.ValueNumber == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		number := &CustomFieldNumber{Value: *v.ValueNumber, Precision: numberPrecision(def)}
 		number.raw = formatFixedPoint(number.Value, number.Precision)
 		value.Number = number
 	case CustomFieldTypeBoolean:
+		if v.ValueBoolean == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.Boolean = v.ValueBoolean
 	case CustomFieldTypeDate:
+		if v.ValueDate == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.Date = &CustomFieldDate{DayCount: *v.ValueDate}
 	case CustomFieldTypeDateTime:
-		value.DateTime = v.ValueDateTime
+		if v.ValueDateTime == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
+		utc := v.ValueDateTime.UTC()
+		value.DateTime = &utc
 	case CustomFieldTypeURL:
+		if v.ValueURL == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.URL = v.ValueURL
 	case CustomFieldTypeUser:
+		if v.ValueUserID == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.UserID = v.ValueUserID
 	case CustomFieldTypeSingleSelect:
+		if v.ValueSingleOptionID == nil {
+			return nil, invalidStoredCustomFieldRow(def.FieldType)
+		}
 		value.SingleOptionID = v.ValueSingleOptionID
 	case CustomFieldTypeMultiSelect:
+		if populated != 0 {
+			return nil, ErrInvalidCustomFieldValue{Message: "The stored value row for a multi-select field must not have a typed column."}
+		}
 		optionIDs, err := getOptionIDsForValue(s, v.ID)
 		if err != nil {
 			return nil, err
 		}
 		value.OptionIDs = optionIDs
+	default:
+		return nil, ErrInvalidCustomFieldType{Type: string(def.FieldType)}
 	}
 
 	return value, nil
+}
+
+func invalidStoredCustomFieldRow(t CustomFieldType) error {
+	return ErrInvalidCustomFieldValue{
+		Message: fmt.Sprintf("The stored value row for a %s field is missing its typed column.", string(t)),
+	}
+}
+
+func (v *TaskCustomFieldValue) populatedStoredFields() int {
+	populated := 0
+	for _, set := range []bool{
+		v.ValueShortText != nil,
+		v.ValueLongText != nil,
+		v.ValueNumber != nil,
+		v.ValueBoolean != nil,
+		v.ValueDate != nil,
+		v.ValueDateTime != nil,
+		v.ValueURL != nil,
+		v.ValueUserID != nil,
+		v.ValueSingleOptionID != nil,
+	} {
+		if set {
+			populated++
+		}
+	}
+	return populated
 }
 
 // upsert replaces all typed columns or inserts the first value row. The caller

@@ -208,6 +208,10 @@ func isStandardCRUDRoute(routeGroupName string, routeParts []string, _ string) b
 		"tasks_relations":      true,
 		"teams_members":        true,
 		"projects_views_tasks": true,
+		// Custom-field resources (v2-only; see pkg/routes/api/v2/custom_field_*.go).
+		"projects_custom_field_definitions":         true,
+		"projects_custom_field_definitions_options": true,
+		"tasks_custom_field_values":                 true,
 	}
 
 	// Check if this is a standard CRUD resource

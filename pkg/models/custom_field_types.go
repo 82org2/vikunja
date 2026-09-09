@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 // CustomFieldType is the immutable type of a custom field definition and the
@@ -125,6 +127,14 @@ func (n *CustomFieldNumber) Scale(precision int) error {
 	n.Value = v
 	n.Precision = precision
 	return nil
+}
+
+// Schema lets Huma (/api/v2) reflect CustomFieldNumber as a JSON number. The
+// custom Marshal/UnmarshalJSON exchange a bare decimal literal, but the Go type
+// is a struct — without this Huma would generate an object schema and reject
+// the number form clients actually send.
+func (*CustomFieldNumber) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{Type: huma.TypeNumber}
 }
 
 func (n *CustomFieldNumber) MarshalJSON() ([]byte, error) {
@@ -266,6 +276,12 @@ func (d *CustomFieldDate) UnmarshalJSON(data []byte) error {
 	return d.parse(s)
 }
 
+// Schema lets Huma (/api/v2) reflect CustomFieldDate as a date string: the wire
+// form is ISO 2006-01-02 while the Go type holds a day count.
+func (*CustomFieldDate) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{Type: huma.TypeString, Format: "date"}
+}
+
 func (d *CustomFieldDate) parse(s string) error {
 	// Strict ISO shape before time.Parse, which would otherwise accept
 	// single-digit months and days.
@@ -300,18 +316,18 @@ func dayCountToTime(days int64) time.Time {
 // must match the Type discriminant. It maps onto exactly one typed column of
 // custom_field_values (multi-select uses the membership table).
 type CustomFieldValue struct {
-	Type CustomFieldType `json:"type"`
+	Type CustomFieldType `json:"type" doc:"The type of this value. It must match the definition's immutable field type."`
 
-	ShortText      *string            `json:"short_text,omitempty"`
-	LongText       *string            `json:"long_text,omitempty"`
-	Number         *CustomFieldNumber `json:"number,omitempty"`
-	Boolean        *bool              `json:"boolean,omitempty"`
-	Date           *CustomFieldDate   `json:"date,omitempty"`
-	DateTime       *time.Time         `json:"datetime,omitempty"`
-	URL            *string            `json:"url,omitempty"`
-	UserID         *int64             `json:"user_id,omitempty"`
-	SingleOptionID *int64             `json:"single_option_id,omitempty"`
-	OptionIDs      []int64            `json:"option_ids,omitempty"`
+	ShortText      *string            `json:"short_text,omitempty" doc:"Short text value, at most 255 characters."`
+	LongText       *string            `json:"long_text,omitempty" doc:"Long text value, at most 65535 bytes."`
+	Number         *CustomFieldNumber `json:"number,omitempty" doc:"Fixed-point number value, exact at the definition's precision."`
+	Boolean        *bool              `json:"boolean,omitempty" doc:"Boolean value."`
+	Date           *CustomFieldDate   `json:"date,omitempty" doc:"Date value in ISO 2006-01-02 form."`
+	DateTime       *time.Time         `json:"datetime,omitempty" doc:"Date-time value, a UTC instant exchanged as RFC 3339."`
+	URL            *string            `json:"url,omitempty" doc:"URL value, a validated absolute HTTP(S) URL of at most 2048 characters."`
+	UserID         *int64             `json:"user_id,omitempty" doc:"User value, an active user visible in the definition's project."`
+	SingleOptionID *int64             `json:"single_option_id,omitempty" doc:"Single-select value, an option of the definition."`
+	OptionIDs      []int64            `json:"option_ids,omitempty" doc:"Multi-select value, options of the definition. An empty array unsets the field."`
 }
 
 // validate checks the discriminated shape: a valid type, exactly one populated
@@ -323,12 +339,27 @@ func (v *CustomFieldValue) validate() error {
 		return err
 	}
 
+	// An empty multi-select value represents "unset" on the wire; the setter
+	// deletes the row rather than storing it. Everything else must be exactly
+	// one typed field.
+	if v.Type == CustomFieldTypeMultiSelect && v.OptionIDs != nil && v.populatedFields() == 0 {
+		return nil
+	}
+
 	if v.populatedFields() != 1 {
 		return ErrInvalidCustomFieldValue{Message: "A custom field value must contain exactly one typed value."}
 	}
 
 	if err := v.validateTypedField(); err != nil {
 		return err
+	}
+
+	// Date-time values are exchanged as RFC 3339 and stored as UTC instants;
+	// normalising here keeps the stored column and every response in UTC even
+	// when a client sends an offset.
+	if v.Type == CustomFieldTypeDateTime && v.DateTime != nil {
+		utc := v.DateTime.UTC()
+		v.DateTime = &utc
 	}
 
 	if v.Type == CustomFieldTypeMultiSelect {

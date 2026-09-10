@@ -37,7 +37,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 
 		number := &CustomFieldNumber{}
 		require.NoError(t, number.SetRaw("7.5"))
-		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number})
+		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number}, nil)
 		require.NoError(t, err)
 		require.NoError(t, s.Commit())
 
@@ -59,7 +59,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		// task 1 already has value_number 75 for definition 1; writing -25 must replace it.
 		number := &CustomFieldNumber{}
 		require.NoError(t, number.SetRaw("-2.5"))
-		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number})
+		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number}, nil)
 		require.NoError(t, err)
 		require.NoError(t, s.Commit())
 
@@ -80,7 +80,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		require.NoError(t, err)
 
 		// task 2 already has tags [3, 4] through value id 7; replacing drops option 4.
-		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{3}})
+		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{3}}, nil)
 		require.NoError(t, err)
 		require.NoError(t, s.Commit())
 
@@ -103,7 +103,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 		def, err := GetCustomFieldDefinitionByID(s, 1) // number
 		require.NoError(t, err)
 
-		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeBoolean, Boolean: boolPtr(true)})
+		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeBoolean, Boolean: boolPtr(true)}, nil)
 		require.Error(t, err)
 	})
 
@@ -114,7 +114,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 
 		def, err := GetCustomFieldDefinitionByID(s, 7) // project 2
 		require.NoError(t, err)
-		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeShortText, ShortText: strPtr("nope")})
+		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeShortText, ShortText: strPtr("nope")}, nil)
 		require.Error(t, err)
 	})
 
@@ -125,7 +125,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 
 		def, err := GetCustomFieldDefinitionByID(s, 5)
 		require.NoError(t, err)
-		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeBoolean, Boolean: boolPtr(true)})
+		err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeBoolean, Boolean: boolPtr(true)}, nil)
 		require.Error(t, err)
 	})
 
@@ -136,7 +136,7 @@ func TestSetCustomFieldValue(t *testing.T) {
 
 		def, err := GetCustomFieldDefinitionByID(s, 4)
 		require.NoError(t, err)
-		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}})
+		err = SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}}, nil)
 		require.NoError(t, err)
 		require.NoError(t, s.Commit())
 
@@ -155,7 +155,7 @@ func TestUnsetCustomFieldValue(t *testing.T) {
 		defer s.Close()
 
 		// task 2 definition 4 has a multi-select value with two memberships.
-		require.NoError(t, UnsetCustomFieldValue(s, 2, 4))
+		require.NoError(t, UnsetCustomFieldValue(s, 2, 4, nil))
 		require.NoError(t, s.Commit())
 
 		db.AssertMissing(t, "custom_field_values", map[string]interface{}{
@@ -172,7 +172,7 @@ func TestUnsetCustomFieldValue(t *testing.T) {
 		s := db.NewSession()
 		defer s.Close()
 
-		require.NoError(t, UnsetCustomFieldValue(s, 1, 3)) // no value row for task 1, definition 3
+		require.NoError(t, UnsetCustomFieldValue(s, 1, 3, nil)) // no value row for task 1, definition 3
 		require.NoError(t, s.Commit())
 	})
 }
@@ -289,7 +289,7 @@ func TestMaterialiseCustomFieldDefaults(t *testing.T) {
 		task := &Task{Title: "Unset me", ProjectID: 2}
 		require.NoError(t, task.Create(s, usr))
 
-		require.NoError(t, UnsetCustomFieldValue(s, task.ID, def.ID))
+		require.NoError(t, UnsetCustomFieldValue(s, task.ID, def.ID, nil))
 		require.NoError(t, s.Commit())
 
 		db.AssertMissing(t, "custom_field_values", map[string]interface{}{

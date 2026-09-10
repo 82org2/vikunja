@@ -27,8 +27,10 @@ import (
 	"unicode/utf8"
 
 	"code.vikunja.io/api/pkg/db"
+	"code.vikunja.io/api/pkg/events"
 	"code.vikunja.io/api/pkg/user"
 	"code.vikunja.io/api/pkg/web"
+	"github.com/google/uuid"
 	"xorm.io/builder"
 	"xorm.io/xorm"
 	"xorm.io/xorm/schemas"
@@ -360,7 +362,7 @@ func (d *CustomFieldDefinition) ReadAll(s *xorm.Session, a web.Auth, search stri
 
 // Delete archives the definition rather than removing the row, so retained
 // values and options keep being describable. Idempotent.
-func (d *CustomFieldDefinition) Delete(s *xorm.Session, _ web.Auth) (err error) {
+func (d *CustomFieldDefinition) Delete(s *xorm.Session, a web.Auth) (err error) {
 	if err = lockCustomFieldDefinition(s, d.ID); err != nil {
 		return err
 	}
@@ -375,6 +377,28 @@ func (d *CustomFieldDefinition) Delete(s *xorm.Session, _ web.Auth) (err error) 
 	if _, err = s.ID(d.ID).Cols("is_archived", "updated").Update(&CustomFieldDefinition{IsArchived: true}); err != nil {
 		return err
 	}
+
+	// Reload the committed row so the new snapshot carries the persisted state
+	// (fresh updated timestamp) rather than a copy of the pre-archive row.
+	persisted, err := GetCustomFieldDefinitionByID(s, d.ID)
+	if err != nil {
+		return err
+	}
+
+	events.DispatchOnCommit(s, &CustomFieldDefinitionEvent{
+		EventID:       uuid.NewString(),
+		Version:       1,
+		Semantic:      CustomFieldDefinitionArchived,
+		ProjectID:     persisted.ProjectID,
+		DefinitionID:  persisted.ID,
+		MachineKey:    persisted.MachineKey,
+		Type:          persisted.FieldType,
+		OldDefinition: existing,
+		NewDefinition: persisted,
+		Doer:          doerFromAuth(s, a),
+		Timestamp:     time.Now(),
+	})
+
 	return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
 }
 
@@ -382,15 +406,25 @@ func (d *CustomFieldDefinition) Delete(s *xorm.Session, _ web.Auth) (err error) 
 // and multi-select memberships. Populated definitions return a conflict unless
 // deleteValues is set, which is how the API surfaces the confirmed destructive
 // action. Cleanup order follows the wiki: memberships, values, options, definition.
-func (d *CustomFieldDefinition) DeletePermanently(s *xorm.Session, deleteValues bool) (err error) {
-	existing, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
-	if err != nil {
+// testHookBeforePermanentDeleteLock, when set, is called just before
+// DeletePermanently acquires the definition lock. Concurrency tests use it as a
+// barrier to prove the delete reached the critical section before a competing
+// transaction commits.
+var testHookBeforePermanentDeleteLock func()
+
+func (d *CustomFieldDefinition) DeletePermanently(s *xorm.Session, deleteValues bool, a web.Auth) (err error) {
+	// Lock the definition row before reading it so a concurrent update or value
+	// write (which take the same lock) cannot commit between the read and the
+	// delete; the event's old snapshot must reflect the state at deletion time.
+	if testHookBeforePermanentDeleteLock != nil {
+		testHookBeforePermanentDeleteLock()
+	}
+	if err = lockCustomFieldDefinition(s, d.ID); err != nil {
 		return err
 	}
 
-	// Lock the definition row so a concurrent value write (which takes the same
-	// lock) cannot insert a value for this definition while it is being deleted.
-	if err = lockCustomFieldDefinition(s, d.ID); err != nil {
+	existing, err := GetCustomFieldDefinitionByIDAndProject(s, d.ID, d.ProjectID)
+	if err != nil {
 		return err
 	}
 
@@ -431,6 +465,20 @@ func (d *CustomFieldDefinition) DeletePermanently(s *xorm.Session, deleteValues 
 	if _, err = s.Where("id = ?", d.ID).Delete(&CustomFieldDefinition{}); err != nil {
 		return err
 	}
+
+	events.DispatchOnCommit(s, &CustomFieldDefinitionEvent{
+		EventID:       uuid.NewString(),
+		Version:       1,
+		Semantic:      CustomFieldDefinitionDeleted,
+		ProjectID:     existing.ProjectID,
+		DefinitionID:  d.ID,
+		MachineKey:    existing.MachineKey,
+		Type:          existing.FieldType,
+		OldDefinition: existing,
+		NewDefinition: nil,
+		Doer:          doerFromAuth(s, a),
+		Timestamp:     time.Now(),
+	})
 
 	return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
 }
@@ -526,7 +574,7 @@ func (d *CustomFieldDefinition) validate(s *xorm.Session) error {
 
 // Create adds a definition to a project, enforcing the per-project limit and
 // backfilling the position.
-func (d *CustomFieldDefinition) Create(s *xorm.Session, _ web.Auth) (err error) {
+func (d *CustomFieldDefinition) Create(s *xorm.Session, a web.Auth) (err error) {
 	if err = d.validate(s); err != nil {
 		return err
 	}
@@ -567,13 +615,27 @@ func (d *CustomFieldDefinition) Create(s *xorm.Session, _ web.Auth) (err error) 
 		return err
 	}
 
+	events.DispatchOnCommit(s, &CustomFieldDefinitionEvent{
+		EventID:       uuid.NewString(),
+		Version:       1,
+		Semantic:      CustomFieldDefinitionCreated,
+		ProjectID:     d.ProjectID,
+		DefinitionID:  d.ID,
+		MachineKey:    d.MachineKey,
+		Type:          d.FieldType,
+		OldDefinition: nil,
+		NewDefinition: d,
+		Doer:          doerFromAuth(s, a),
+		Timestamp:     time.Now(),
+	})
+
 	return nil
 }
 
 // Update edits the editable fields of a definition. Its project, machine key,
 // and field type are immutable, and new numeric constraints must remain valid
 // for every stored value.
-func (d *CustomFieldDefinition) Update(s *xorm.Session, _ web.Auth) (err error) {
+func (d *CustomFieldDefinition) Update(s *xorm.Session, a web.Auth) (err error) {
 	// Lock the definition row before validating the new configuration against
 	// stored values, so a concurrent value write cannot commit a value that
 	// violates the constraints being applied.
@@ -610,7 +672,82 @@ func (d *CustomFieldDefinition) Update(s *xorm.Session, _ web.Auth) (err error) 
 		return err
 	}
 
+	// An archive-state change is its own event; a no-op update emits nothing.
+	semantic := CustomFieldDefinitionUpdated
+	if existing.IsArchived != d.IsArchived {
+		if d.IsArchived {
+			semantic = CustomFieldDefinitionArchived
+		} else {
+			semantic = CustomFieldDefinitionUnarchived
+		}
+	} else if definitionEditableFieldsEqual(existing, d) {
+		return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
+	}
+
+	// Reload the committed row so the event's new snapshot carries the persisted
+	// state (fresh updated timestamp, canonicalised configuration) rather than
+	// the request model, which may omit read-only fields.
+	persisted, err := GetCustomFieldDefinitionByID(s, d.ID)
+	if err != nil {
+		return err
+	}
+
+	events.DispatchOnCommit(s, &CustomFieldDefinitionEvent{
+		EventID:       uuid.NewString(),
+		Version:       1,
+		Semantic:      semantic,
+		ProjectID:     persisted.ProjectID,
+		DefinitionID:  persisted.ID,
+		MachineKey:    persisted.MachineKey,
+		Type:          persisted.FieldType,
+		OldDefinition: existing,
+		NewDefinition: persisted,
+		Doer:          doerFromAuth(s, a),
+		Timestamp:     time.Now(),
+	})
+
 	return updateProjectLastUpdated(s, &Project{ID: existing.ProjectID})
+}
+
+// definitionEditableFieldsEqual reports whether an update changes none of the
+// editable fields, so no updated event is warranted. Configuration and the
+// default value are compared semantically (a number literal that rescales to
+// the same value is not a change).
+func definitionEditableFieldsEqual(a, b *CustomFieldDefinition) bool {
+	return a.Title == b.Title &&
+		a.Description == b.Description &&
+		a.Position == b.Position &&
+		a.ShowOnCard == b.ShowOnCard &&
+		a.ShowInTable == b.ShowInTable &&
+		configurationEqual(a.Configuration, b.Configuration) &&
+		normalizeDefaultValueForComparison(a).Equals(b.DefaultValue)
+}
+
+// normalizeDefaultValueForComparison returns a copy of the definition's default
+// value with a stored numeric default scaled at the definition's precision. A
+// numeric default loaded from JSON carries only its raw literal; Value and
+// Precision stay zeroed until Scale is called, so without this an unchanged
+// non-zero default would compare unequal to the incoming, already-scaled value.
+func normalizeDefaultValueForComparison(def *CustomFieldDefinition) *CustomFieldValue {
+	if def == nil || def.DefaultValue == nil || def.DefaultValue.Type != CustomFieldTypeNumber || def.DefaultValue.Number == nil {
+		return def.DefaultValue
+	}
+	normalized := *def.DefaultValue
+	number := *def.DefaultValue.Number
+	normalized.Number = &number
+	_ = normalized.Number.Scale(numberPrecision(def))
+	return &normalized
+}
+
+func configurationEqual(a, b *CustomFieldConfiguration) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return ptrEqual(a.Precision, b.Precision) &&
+		ptrEqual(a.Min, b.Min) &&
+		ptrEqual(a.Max, b.Max) &&
+		ptrEqual(a.Step, b.Step) &&
+		a.Unit == b.Unit
 }
 
 func validateConfigurationAgainstStoredValues(s *xorm.Session, existing, updated *CustomFieldDefinition) error {

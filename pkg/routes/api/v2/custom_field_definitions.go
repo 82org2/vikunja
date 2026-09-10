@@ -22,6 +22,7 @@ import (
 	"net/http"
 
 	"code.vikunja.io/api/pkg/db"
+	"code.vikunja.io/api/pkg/events"
 	"code.vikunja.io/api/pkg/models"
 	"code.vikunja.io/api/pkg/web/handler"
 
@@ -211,19 +212,24 @@ func customFieldDefinitionsPermanentDelete(ctx context.Context, in *struct {
 	can, err := def.CanDelete(s, a)
 	if err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 	if !can {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, huma.Error403Forbidden("forbidden")
 	}
 
-	if err := def.DeletePermanently(s, in.Body.DeleteValues); err != nil {
+	if err := def.DeletePermanently(s, in.Body.DeleteValues, a); err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 	if err := s.Commit(); err != nil {
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
+	events.DispatchPending(ctx, s)
 	return &emptyBody{}, nil
 }

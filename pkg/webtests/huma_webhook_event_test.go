@@ -41,6 +41,21 @@ func TestHumaWebhookEvents(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &events))
 		assert.ElementsMatch(t, models.GetAvailableWebhookEvents(), events)
 	})
+	t.Run("Custom field events are available", func(t *testing.T) {
+		// The webtest harness does not call RegisterListeners(), so the
+		// custom-field events are registered explicitly like the existing
+		// TaskUpdatedEvent registration in huma_webhook_test.go.
+		models.RegisterEventForWebhook(&models.CustomFieldDefinitionEvent{})
+		models.RegisterEventForWebhook(&models.CustomFieldValueEvent{})
+
+		rec := humaRequest(t, e, http.MethodGet, "/api/v2/webhooks/events", "", humaTokenFor(t, &testuser1), "")
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+		var events []string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &events))
+		assert.Contains(t, events, "custom_field.definition.changed.v1")
+		assert.Contains(t, events, "custom_field.value.changed.v1")
+	})
 	t.Run("Unauthenticated", func(t *testing.T) {
 		rec := humaRequest(t, e, http.MethodGet, "/api/v2/webhooks/events", "", "", "")
 		assert.Equal(t, http.StatusUnauthorized, rec.Code, "body: %s", rec.Body.String())

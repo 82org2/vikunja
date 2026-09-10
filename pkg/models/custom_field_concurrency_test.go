@@ -21,8 +21,10 @@ import (
 	"testing"
 
 	"code.vikunja.io/api/pkg/db"
+	"code.vikunja.io/api/pkg/events"
 	"code.vikunja.io/api/pkg/user"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"xorm.io/xorm/schemas"
 )
@@ -44,7 +46,7 @@ func TestSetCustomFieldValueDoesNotTouchDefinitionOrProjectTimestamp(t *testing.
 
 	number := &CustomFieldNumber{}
 	require.NoError(t, number.SetRaw("7.5"))
-	require.NoError(t, SetCustomFieldValue(s, 1, defBefore, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number}))
+	require.NoError(t, SetCustomFieldValue(s, 1, defBefore, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number}, nil))
 	require.NoError(t, s.Commit())
 
 	projectAfter, err := GetProjectSimpleByID(s, 1)
@@ -84,7 +86,7 @@ func TestCustomFieldValuePermanentDeleteRace(t *testing.T) {
 		defer wg.Done()
 		s := db.NewSession()
 		defer s.Close()
-		delErr = (&CustomFieldDefinition{ID: 1, ProjectID: 1}).DeletePermanently(s, true)
+		delErr = (&CustomFieldDefinition{ID: 1, ProjectID: 1}).DeletePermanently(s, true, nil)
 		if delErr != nil {
 			_ = s.Rollback()
 			return
@@ -100,7 +102,7 @@ func TestCustomFieldValuePermanentDeleteRace(t *testing.T) {
 			setErr = err
 			return
 		}
-		setErr = SetCustomFieldValue(s, 1, &CustomFieldDefinition{ID: 1}, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number})
+		setErr = SetCustomFieldValue(s, 1, &CustomFieldDefinition{ID: 1}, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number}, nil)
 		if setErr != nil {
 			_ = s.Rollback()
 			return
@@ -172,7 +174,7 @@ func TestCustomFieldValueConstraintUpdateRace(t *testing.T) {
 			setErr = err
 			return
 		}
-		setErr = SetCustomFieldValue(s, 1, &CustomFieldDefinition{ID: 1}, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number})
+		setErr = SetCustomFieldValue(s, 1, &CustomFieldDefinition{ID: 1}, &CustomFieldValue{Type: CustomFieldTypeNumber, Number: number}, nil)
 		if setErr != nil {
 			_ = s.Rollback()
 			return
@@ -201,4 +203,56 @@ func TestCustomFieldValueConstraintUpdateRace(t *testing.T) {
 	final, err := GetCustomFieldDefinitionByID(s, 1)
 	require.NoError(t, err)
 	require.NoError(t, validateConfigurationAgainstStoredValues(s, final, final), "a committed value violates the final configuration")
+}
+
+// A definition update racing with permanent deletion: the update holds the
+// definition lock first, so the delete waits for it. The delete's old snapshot
+// must then reflect the committed update, not the pre-update row it would have
+// read before the lock.
+func TestCustomFieldDefinitionUpdatePermanentDeleteRace(t *testing.T) {
+	skipWithoutRowLocks(t)
+	db.LoadAndAssertFixtures(t)
+
+	updateS := db.NewSession()
+	defer updateS.Close()
+	require.NoError(t, (&CustomFieldDefinition{
+		ID: 1, ProjectID: 1, MachineKey: "impact", FieldType: CustomFieldTypeNumber, Title: "Impact updated",
+		Configuration: &CustomFieldConfiguration{Precision: intPtr(1)},
+	}).Update(updateS, &user.User{ID: 1}))
+
+	// The delete signals through the hook once it reaches the lock, so the
+	// update is committed only after the delete is guaranteed to be waiting on
+	// it; the delete's old snapshot must then reflect the committed update.
+	reachedLock := make(chan struct{})
+	testHookBeforePermanentDeleteLock = func() { close(reachedLock) }
+	defer func() { testHookBeforePermanentDeleteLock = nil }()
+
+	events.ClearDispatchedEvents()
+	var delErr, delCommitErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s := db.NewSession()
+		defer s.Close()
+		delErr = (&CustomFieldDefinition{ID: 1, ProjectID: 1}).DeletePermanently(s, true, &user.User{ID: 1})
+		if delErr != nil {
+			_ = s.Rollback()
+			return
+		}
+		delCommitErr = s.Commit()
+		flushPendingEvents(t, s)
+	}()
+	<-reachedLock
+	require.NoError(t, updateS.Commit())
+	wg.Wait()
+
+	require.NoError(t, delErr)
+	require.NoError(t, delCommitErr, "the permanent delete must commit cleanly after the update")
+
+	dispatched := events.GetDispatchedEvents((&CustomFieldDefinitionEvent{}).Name())
+	require.Len(t, dispatched, 1)
+	evt := dispatched[0].(*CustomFieldDefinitionEvent)
+	require.NotNil(t, evt.OldDefinition)
+	assert.Equal(t, "Impact updated", evt.OldDefinition.Title, "the delete's old snapshot must reflect the committed update")
 }

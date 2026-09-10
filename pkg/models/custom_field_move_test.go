@@ -97,7 +97,7 @@ func TestPreflightTaskMoveCustomFields(t *testing.T) {
 		}
 		require.NoError(t, def.Create(s, nil))
 		value := "x"
-		require.NoError(t, SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeShortText, ShortText: &value}))
+		require.NoError(t, SetCustomFieldValue(s, 2, def, &CustomFieldValue{Type: CustomFieldTypeShortText, ShortText: &value}, nil))
 
 		_, _, err := preflightTaskMoveCustomFields(s, 2, 12)
 		require.Error(t, err)
@@ -114,7 +114,7 @@ func TestPreflightTaskMoveCustomFields(t *testing.T) {
 			Label:        "Mobile",
 		}
 		require.NoError(t, opt.Create(s, nil))
-		require.NoError(t, SetCustomFieldValue(s, 2, &CustomFieldDefinition{ID: 4}, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{opt.ID}}))
+		require.NoError(t, SetCustomFieldValue(s, 2, &CustomFieldDefinition{ID: 4}, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{opt.ID}}, nil))
 
 		_, _, err := preflightTaskMoveCustomFields(s, 2, 12)
 		require.Error(t, err)

@@ -133,7 +133,7 @@ func TestAddCustomFieldsToTasks_QueryCountIsBounded(t *testing.T) {
 		err := SetCustomFieldValue(s, id, multiSelectDef, &CustomFieldValue{
 			Type:      CustomFieldTypeMultiSelect,
 			OptionIDs: []int64{3, 4},
-		})
+		}, nil)
 		require.NoError(t, err)
 		taskIDs = append(taskIDs, id)
 	}

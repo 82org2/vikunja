@@ -23,7 +23,9 @@ import (
 	"sort"
 	"time"
 
+	"code.vikunja.io/api/pkg/events"
 	"code.vikunja.io/api/pkg/web"
+	"github.com/google/uuid"
 	"xorm.io/xorm"
 )
 
@@ -217,7 +219,10 @@ func missingCustomFieldDefinitionError(row *TaskCustomFieldValue) error {
 // Set stores the given value for the task and definition, replacing any
 // existing row and, for multi-select, its memberships. The session is expected
 // to be transactional so the upsert and membership replace commit together.
-func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefinition, value *CustomFieldValue) error {
+// A nil auth suppresses lifecycle events (internal callers such as default
+// materialisation); a non-nil auth queues a value event and one task.updated
+// event, both dispatched after the transaction commits.
+func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefinition, value *CustomFieldValue, a web.Auth) error {
 	if value == nil {
 		return ErrInvalidCustomFieldValue{Message: "A custom field value is required."}
 	}
@@ -263,9 +268,28 @@ func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefiniti
 
 	// An empty multi-select value means "unset": delete the row instead of
 	// storing it. This runs after the definition checks so a number, foreign, or
-	// nonexistent definition fails the normal validation first.
+	// nonexistent definition fails the normal validation first. The task and
+	// definition locks are already held, so the locked unset helper is used.
 	if value.Type == CustomFieldTypeMultiSelect && value.OptionIDs != nil && len(value.OptionIDs) == 0 && value.populatedFields() == 0 {
-		return UnsetCustomFieldValue(s, taskID, persistedDef.ID)
+		return unsetCustomFieldValueLocked(s, taskID, persistedDef, a)
+	}
+
+	// An idempotent set — the stored value already equals the new one — must not
+	// write or emit anything: no task timestamp advance, no upsert, no event.
+	oldRow := &TaskCustomFieldValue{}
+	has, err := s.Where("task_id = ? AND definition_id = ?", taskID, persistedDef.ID).Get(oldRow)
+	if err != nil {
+		return err
+	}
+	var oldValue *CustomFieldValue
+	if has {
+		oldValue, err = oldRow.FromRow(s, persistedDef)
+		if err != nil {
+			return err
+		}
+		if oldValue.Equals(value) {
+			return nil
+		}
 	}
 
 	row, err := value.toRow(taskID, persistedDef.ID)
@@ -292,7 +316,29 @@ func SetCustomFieldValue(s *xorm.Session, taskID int64, def *CustomFieldDefiniti
 		return err
 	}
 
-	return nil
+	if a == nil {
+		return nil
+	}
+
+	semantic := CustomFieldValueSet
+	if has {
+		semantic = CustomFieldValueChanged
+	}
+	events.DispatchOnCommit(s, &CustomFieldValueEvent{
+		EventID:      uuid.NewString(),
+		Version:      1,
+		Semantic:     semantic,
+		ProjectID:    task.ProjectID,
+		TaskID:       taskID,
+		DefinitionID: persistedDef.ID,
+		MachineKey:   persistedDef.MachineKey,
+		Type:         persistedDef.FieldType,
+		OldValue:     oldValue,
+		NewValue:     value,
+		Doer:         doerFromAuth(s, a),
+		Timestamp:    time.Now(),
+	})
+	return triggerTaskUpdatedEventForTaskID(s, a, taskID)
 }
 
 // materialiseCustomFieldDefaults inserts one value row per task for every
@@ -318,7 +364,9 @@ func materialiseCustomFieldDefaults(s *xorm.Session, projectID int64, tasks []*T
 				return err
 			}
 			value := *def.DefaultValue
-			if err := SetCustomFieldValue(s, task.ID, def, &value); err != nil {
+			// Defaults are internal: no lifecycle events, and no task.updated
+			// during task creation.
+			if err := SetCustomFieldValue(s, task.ID, def, &value, nil); err != nil {
 				return err
 			}
 		}
@@ -338,16 +386,39 @@ func isStaleCustomFieldDefaultError(err error, fieldType CustomFieldType) bool {
 
 // UnsetCustomFieldValue removes the value row and its memberships. Unsetting a
 // field that has no row is a no-op, matching the idempotent unset contract.
-func UnsetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) error {
-	// Take the task row lock first, matching SetCustomFieldValue's lock order.
+// A nil auth suppresses lifecycle events; a non-nil auth queues an unset event
+// and one task.updated event, both dispatched after the transaction commits.
+func UnsetCustomFieldValue(s *xorm.Session, taskID, definitionID int64, a web.Auth) error {
+	// Take the task row lock first, then the definition row, matching
+	// SetCustomFieldValue's lock order.
 	if err := lockTaskRow(s, taskID); err != nil {
 		return err
 	}
-	row, err := GetCustomFieldValue(s, taskID, definitionID)
+	if err := lockCustomFieldDefinition(s, definitionID); err != nil {
+		return err
+	}
+	def, err := GetCustomFieldDefinitionByID(s, definitionID)
+	if err != nil {
+		return err
+	}
+	return unsetCustomFieldValueLocked(s, taskID, def, a)
+}
+
+// unsetCustomFieldValueLocked removes the value row and its memberships,
+// assuming the task and definition locks are already held. It is shared by
+// UnsetCustomFieldValue and the empty multi-select path of SetCustomFieldValue,
+// which must not re-acquire the locks it already holds.
+func unsetCustomFieldValueLocked(s *xorm.Session, taskID int64, def *CustomFieldDefinition, a web.Auth) error {
+	row, err := GetCustomFieldValue(s, taskID, def.ID)
 	if err != nil {
 		if IsErrCustomFieldValueDoesNotExist(err) {
 			return nil
 		}
+		return err
+	}
+
+	oldValue, err := row.FromRow(s, def)
+	if err != nil {
 		return err
 	}
 
@@ -358,7 +429,33 @@ func UnsetCustomFieldValue(s *xorm.Session, taskID, definitionID int64) error {
 		return err
 	}
 
-	return updateTaskLastUpdated(s, &Task{ID: taskID})
+	if err = updateTaskLastUpdated(s, &Task{ID: taskID}); err != nil {
+		return err
+	}
+
+	if a == nil {
+		return nil
+	}
+
+	task, err := GetTaskByIDSimple(s, taskID)
+	if err != nil {
+		return err
+	}
+	events.DispatchOnCommit(s, &CustomFieldValueEvent{
+		EventID:      uuid.NewString(),
+		Version:      1,
+		Semantic:     CustomFieldValueUnset,
+		ProjectID:    task.ProjectID,
+		TaskID:       taskID,
+		DefinitionID: def.ID,
+		MachineKey:   def.MachineKey,
+		Type:         def.FieldType,
+		OldValue:     oldValue,
+		NewValue:     nil,
+		Doer:         doerFromAuth(s, a),
+		Timestamp:    time.Now(),
+	})
+	return triggerTaskUpdatedEventForTaskID(s, a, taskID)
 }
 
 // toRow maps the discriminated value onto exactly one typed column of the row.

@@ -79,6 +79,8 @@ func RegisterListeners() {
 		RegisterUserDirectedEventForWebhook(&TaskReminderFiredEvent{})
 		RegisterUserDirectedEventForWebhook(&TaskOverdueEvent{})
 		RegisterUserDirectedEventForWebhook(&TasksOverdueEvent{})
+		RegisterEventForWebhook(&CustomFieldDefinitionEvent{})
+		RegisterEventForWebhook(&CustomFieldValueEvent{})
 
 		// Internal delivery listener — one message per webhook with its own retry lifecycle
 		events.RegisterListener((&WebhookDeliveryEvent{}).Name(), &WebhookDeliveryListener{})
@@ -1294,6 +1296,12 @@ func getProjectIDFromAnyEvent(eventPayload map[string]interface{}) int64 {
 		}
 	}
 
+	// Custom-field events carry the source project id flat rather than nested in
+	// a task or project object. No other event has a flat project_id field.
+	if projectID, has := eventPayload["project_id"]; has {
+		return getIDAsInt64(projectID)
+	}
+
 	return 0
 }
 
@@ -1590,21 +1598,7 @@ func (wl *WebhookListener) Handle(msg *message.Message) (err error) {
 			perWebhookEvent[k] = v
 		}
 
-		if _, has := perWebhookEvent["project"]; !has && webhook.ProjectID > 0 {
-			project, err := GetProjectSimpleByID(s, webhook.ProjectID)
-			if err != nil && !IsErrProjectDoesNotExist(err) {
-				log.Errorf("Could not load project for webhook %d: %s", webhook.ID, err)
-			}
-			if project != nil {
-				err = project.ReadOne(s, &user.User{ID: doerID})
-				if err != nil && !IsErrProjectDoesNotExist(err) {
-					log.Errorf("Could not load project for webhook %d: %s", webhook.ID, err)
-				}
-				if err == nil {
-					perWebhookEvent["project"] = project
-				}
-			}
-		}
+		enrichWebhookPayloadWithProject(s, perWebhookEvent, webhook, doerID)
 
 		dispatchErr := events.Dispatch(&WebhookDeliveryEvent{
 			WebhookID: webhook.ID,
@@ -1624,6 +1618,32 @@ func (wl *WebhookListener) Handle(msg *message.Message) (err error) {
 	}
 
 	return nil
+}
+
+// enrichWebhookPayloadWithProject injects the webhook's scope project into the
+// payload when the event does not already carry a project. Flat-ID events
+// (custom fields) identify the source project via project_id, so injecting the
+// webhook's scope project would be ambiguous for ancestor webhooks and is
+// skipped for them.
+func enrichWebhookPayloadWithProject(s *xorm.Session, perWebhookEvent map[string]interface{}, webhook *Webhook, doerID int64) {
+	_, hasProject := perWebhookEvent["project"]
+	_, hasFlatProjectID := perWebhookEvent["project_id"]
+	if hasProject || hasFlatProjectID || webhook.ProjectID <= 0 {
+		return
+	}
+	project, err := GetProjectSimpleByID(s, webhook.ProjectID)
+	if err != nil && !IsErrProjectDoesNotExist(err) {
+		log.Errorf("Could not load project for webhook %d: %s", webhook.ID, err)
+	}
+	if project != nil {
+		err = project.ReadOne(s, &user.User{ID: doerID})
+		if err != nil && !IsErrProjectDoesNotExist(err) {
+			log.Errorf("Could not load project for webhook %d: %s", webhook.ID, err)
+		}
+		if err == nil {
+			perWebhookEvent["project"] = project
+		}
+	}
 }
 
 ///////

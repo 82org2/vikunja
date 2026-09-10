@@ -263,14 +263,14 @@ func TestSetCustomFieldValueEmptyMultiSelectValidatesDefinition(t *testing.T) {
 	// Definition 1 is a number field: an empty multi-select must fail type validation.
 	def, err := GetCustomFieldDefinitionByID(s, 1)
 	require.NoError(t, err)
-	err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}})
+	err = SetCustomFieldValue(s, 1, def, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}}, nil)
 	require.Error(t, err)
 	require.True(t, IsErrInvalidCustomFieldValue(err))
 
 	// Definition 4 is a multi-select field: an empty selection unsets the row.
 	def4, err := GetCustomFieldDefinitionByID(s, 4)
 	require.NoError(t, err)
-	require.NoError(t, SetCustomFieldValue(s, 2, def4, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}}))
+	require.NoError(t, SetCustomFieldValue(s, 2, def4, &CustomFieldValue{Type: CustomFieldTypeMultiSelect, OptionIDs: []int64{}}, nil))
 	_, err = GetCustomFieldValue(s, 2, 4)
 	require.Error(t, err)
 	require.True(t, IsErrCustomFieldValueDoesNotExist(err))

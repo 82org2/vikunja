@@ -75,6 +75,7 @@ func init() {
 		"GetTOTPQrCodeAsJpegForUser":           reflect.ValueOf(user.GetTOTPQrCodeAsJpegForUser),
 		"GetTOTPQrCodeForUser":                 reflect.ValueOf(user.GetTOTPQrCodeForUser),
 		"GetTables":                            reflect.ValueOf(user.GetTables),
+		"GetUserByEmail":                       reflect.ValueOf(user.GetUserByEmail),
 		"GetUserByID":                          reflect.ValueOf(user.GetUserByID),
 		"GetUserByUsername":                    reflect.ValueOf(user.GetUserByUsername),
 		"GetUserFromClaims":                    reflect.ValueOf(user.GetUserFromClaims),

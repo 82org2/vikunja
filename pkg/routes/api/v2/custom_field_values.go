@@ -21,6 +21,7 @@ import (
 	"net/http"
 
 	"code.vikunja.io/api/pkg/db"
+	"code.vikunja.io/api/pkg/events"
 	"code.vikunja.io/api/pkg/models"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -72,21 +73,25 @@ func customFieldValuesSet(ctx context.Context, in *struct {
 	can, err := models.CanWriteCustomFieldValue(s, in.TaskID, a)
 	if err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 	if !can {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, huma.Error403Forbidden("forbidden")
 	}
 
 	def, err := models.GetCustomFieldDefinitionByID(s, in.DefinitionID)
 	if err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 
-	if err := models.SetCustomFieldValue(s, in.TaskID, def, &in.Body); err != nil {
+	if err := models.SetCustomFieldValue(s, in.TaskID, def, &in.Body, a); err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 
@@ -95,8 +100,10 @@ func customFieldValuesSet(ctx context.Context, in *struct {
 	// selection instead of a 404 on the now-missing row.
 	if in.Body.Type == models.CustomFieldTypeMultiSelect && in.Body.OptionIDs != nil && len(in.Body.OptionIDs) == 0 {
 		if err := s.Commit(); err != nil {
+			events.CleanupPending(s)
 			return nil, translateDomainError(err)
 		}
+		events.DispatchPending(ctx, s)
 		return &singleBody[models.CustomFieldValue]{Body: &models.CustomFieldValue{Type: models.CustomFieldTypeMultiSelect, OptionIDs: []int64{}}}, nil
 	}
 
@@ -104,17 +111,21 @@ func customFieldValuesSet(ctx context.Context, in *struct {
 	row, err := models.GetCustomFieldValue(s, in.TaskID, in.DefinitionID)
 	if err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 	value, err := row.FromRow(s, def)
 	if err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 
 	if err := s.Commit(); err != nil {
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
+	events.DispatchPending(ctx, s)
 	return &singleBody[models.CustomFieldValue]{Body: value}, nil
 }
 
@@ -133,20 +144,25 @@ func customFieldValuesUnset(ctx context.Context, in *struct {
 	can, err := models.CanWriteCustomFieldValue(s, in.TaskID, a)
 	if err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 	if !can {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, huma.Error403Forbidden("forbidden")
 	}
 
-	if err := models.UnsetCustomFieldValue(s, in.TaskID, in.DefinitionID); err != nil {
+	if err := models.UnsetCustomFieldValue(s, in.TaskID, in.DefinitionID, a); err != nil {
 		_ = s.Rollback()
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
 
 	if err := s.Commit(); err != nil {
+		events.CleanupPending(s)
 		return nil, translateDomainError(err)
 	}
+	events.DispatchPending(ctx, s)
 	return &emptyBody{}, nil
 }

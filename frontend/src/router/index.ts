@@ -304,6 +304,14 @@ const router = createRouter({
 			},
 		},
 		{
+			path: '/projects/:projectId/settings/custom-fields',
+			name: 'project.settings.customFields',
+			component: () => import('@/views/project/settings/ProjectSettingsCustomFields.vue'),
+			meta: {
+				showAsModal: true,
+			},
+		},
+		{
 			path: '/projects/:projectId/settings/delete',
 			name: 'project.settings.delete',
 			component: () => import('@/views/project/settings/ProjectSettingsDelete.vue'),

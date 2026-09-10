@@ -44,6 +44,14 @@ vi.mock('@/stores/tasks', () => ({
 	useTaskStore: () => ({setDraggedTask: vi.fn()}),
 }))
 
+vi.mock('@/stores/customFieldRegistry', () => ({
+	useCustomFieldRegistryStore: () => ({
+		getDefinitionsForProject: () => [],
+		ensureProjectMetadata: vi.fn(),
+		mergeTaskValues: () => [],
+	}),
+}))
+
 vi.mock('@/services/savedFilter', () => ({
 	isSavedFilter: () => false,
 	useSavedFilter: () => ({filter: ref(null)}),

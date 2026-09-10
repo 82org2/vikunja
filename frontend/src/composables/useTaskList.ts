@@ -38,11 +38,19 @@ const VALID_SORT_FIELDS = new Set<string>(
 		'end_date', 'percent_done', 'created', 'updated', 'done_at', 'position'],
 )
 
+function isCustomFieldSortKey(field: string): boolean {
+	return field.startsWith('custom_fields.')
+}
+
+function isValidSortField(field: string): boolean {
+	return VALID_SORT_FIELDS.has(field) || isCustomFieldSortKey(field)
+}
+
 function parseSortQuery(raw: string, fallback: SortBy): SortBy {
 	const result: Record<string, Order> = {}
 	for (const part of raw.split(',')) {
 		const [field, order] = part.split(':')
-		if (!VALID_SORT_FIELDS.has(field)) continue
+		if (!isValidSortField(field)) continue
 		if (order !== 'asc' && order !== 'desc') continue
 		result[field] = order
 	}
@@ -107,7 +115,7 @@ export function useTaskList(
 	projectIdGetter: ComputedGetter<IProject['id']>,
 	projectViewIdGetter: ComputedGetter<IProjectView['id']>,
 	sortByDefault: SortBy = SORT_BY_DEFAULT,
-	expandGetter: ComputedGetter<ExpandTaskFilterParam> = () => 'subtasks',
+	expandGetter: ComputedGetter<ExpandTaskFilterParam | ExpandTaskFilterParam[]> = () => 'subtasks',
 ) {
 	
 	const projectId = computed(() => projectIdGetter())

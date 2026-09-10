@@ -73,6 +73,37 @@ export default class TaskService extends AbstractService<ITask> {
 		return updated
 	}
 
+	// v2 single-task read: the response body carries max_permission and
+	// custom_fields (always present for user sessions). The v1 read returns
+	// neither, so task detail uses this path.
+	async getV2(id: ITask['id'], expand: string[] = []): Promise<ITask> {
+		const cancel = this.setLoading()
+
+		try {
+			const {data} = await this.http.get(apiV2Url(`tasks/${id}`), {
+				params: {expand},
+				paramsSerializer: (params: Record<string, unknown>) => {
+					const parts: string[] = []
+					for (const [key, value] of Object.entries(params)) {
+						if (Array.isArray(value)) {
+							for (const item of value) {
+								parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`)
+							}
+							continue
+						}
+						parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+					}
+					return parts.join('&')
+				},
+			})
+			const task = new TaskModel(data)
+			task.maxPermission = data.max_permission ?? null
+			return task
+		} finally {
+			cancel()
+		}
+	}
+
 	async delete(model: ITask) {
 		const response = await super.delete(model)
 		invalidateCachedTask(model.id)

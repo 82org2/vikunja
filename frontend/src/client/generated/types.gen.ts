@@ -327,12 +327,25 @@ export type Bucket = {
     updated?: string;
 };
 
+export type BucketWithTasksItem = {
+    count?: number;
+    created?: string;
+    created_by?: User;
+    id?: number;
+    limit?: number;
+    position?: number;
+    project_view_id?: number;
+    tasks?: Array<TaskListItem> | null;
+    title?: string;
+    updated?: string;
+};
+
 export type BucketsWithTasksBodyBody = {
     /**
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
-    items?: Array<Bucket> | null;
+    items?: Array<BucketWithTasksItem> | null;
     /**
      * The number of buckets returned.
      */
@@ -434,6 +447,311 @@ export type CreateUserBody = {
      */
     skip_email_confirm?: boolean;
     username?: string;
+};
+
+export type CustomFieldDefinitionsPermanentDeleteRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * Delete values already stored on this definition as part of the operation. Permanently deleting a populated definition without this flag returns a conflict.
+     */
+    delete_values?: boolean;
+};
+
+export type CustomFieldConfiguration = {
+    /**
+     * Optional fixed-point maximum for number values, exact at the definition's precision.
+     */
+    max?: string;
+    /**
+     * Optional fixed-point minimum for number values, exact at the definition's precision.
+     */
+    min?: string;
+    /**
+     * Number precision, 0-6 fractional digits and the scaling applied to stored values.
+     */
+    precision?: number;
+    /**
+     * Optional positive fixed-point step for number values, exact at the definition's precision.
+     */
+    step?: string;
+    /**
+     * Optional display unit for number values.
+     */
+    unit?: string;
+};
+
+export type CustomFieldDefinition = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * The validated, canonicalised per-type configuration, at most 16 KiB. Only number fields carry settings (precision plus optional min, max, step, and display unit).
+     */
+    configuration?: CustomFieldConfiguration;
+    /**
+     * A timestamp when this definition was created. You cannot change this value.
+     */
+    readonly created?: string;
+    /**
+     * A validated default value, materialised into a regular value row when a new task is created. Changing it is not retroactive and unsetting a task value does not reapply it.
+     */
+    default_value?: CustomFieldValue;
+    /**
+     * A longer description of this definition, at most 4096 bytes.
+     */
+    description?: string;
+    /**
+     * The immutable type of the field. It selects which column of custom_field_values holds values and which editor the frontend uses; it never changes.
+     */
+    field_type?: string;
+    /**
+     * The unique, numeric id of this definition.
+     */
+    readonly id?: number;
+    /**
+     * Whether this definition is archived. Archived definitions cannot receive new values but continue to describe retained ones.
+     */
+    is_archived?: boolean;
+    /**
+     * The immutable, project-local machine key. This is the stable identity used by the API, filters, exports, duplication, and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The position of this definition for ordering, following the usual Vikunja position convention.
+     */
+    position?: number;
+    /**
+     * The project this definition belongs to.
+     */
+    project_id?: number;
+    /**
+     * Whether this field is offered as a table column in views.
+     */
+    show_in_table?: boolean;
+    /**
+     * Whether values of this field are shown on task cards.
+     */
+    show_on_card?: boolean;
+    /**
+     * The display title of this definition.
+     */
+    title?: string;
+    /**
+     * A timestamp when this definition was last updated. You cannot change this value.
+     */
+    readonly updated?: string;
+};
+
+export type CustomFieldDefinitionReadBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * The validated, canonicalised per-type configuration, at most 16 KiB. Only number fields carry settings (precision plus optional min, max, step, and display unit).
+     */
+    configuration?: CustomFieldConfiguration;
+    /**
+     * A timestamp when this definition was created. You cannot change this value.
+     */
+    readonly created?: string;
+    /**
+     * A validated default value, materialised into a regular value row when a new task is created. Changing it is not retroactive and unsetting a task value does not reapply it.
+     */
+    default_value?: CustomFieldValue;
+    /**
+     * A longer description of this definition, at most 4096 bytes.
+     */
+    description?: string;
+    /**
+     * The immutable type of the field. It selects which column of custom_field_values holds values and which editor the frontend uses; it never changes.
+     */
+    field_type?: string;
+    /**
+     * The unique, numeric id of this definition.
+     */
+    readonly id?: number;
+    /**
+     * Whether this definition is archived. Archived definitions cannot receive new values but continue to describe retained ones.
+     */
+    is_archived?: boolean;
+    /**
+     * The immutable, project-local machine key. This is the stable identity used by the API, filters, exports, duplication, and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The maximum permission the requesting user has on this definition (0=read, 1=read/write, 2=admin).
+     */
+    readonly max_permission?: number;
+    /**
+     * The position of this definition for ordering, following the usual Vikunja position convention.
+     */
+    position?: number;
+    /**
+     * The project this definition belongs to.
+     */
+    project_id?: number;
+    /**
+     * Whether this field is offered as a table column in views.
+     */
+    show_in_table?: boolean;
+    /**
+     * Whether values of this field are shown on task cards.
+     */
+    show_on_card?: boolean;
+    /**
+     * The display title of this definition.
+     */
+    title?: string;
+    /**
+     * A timestamp when this definition was last updated. You cannot change this value.
+     */
+    readonly updated?: string;
+};
+
+export type CustomFieldOption = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * A timestamp when this option was created. You cannot change this value.
+     */
+    readonly created?: string;
+    /**
+     * The definition this option belongs to. Only select definitions have options.
+     */
+    definition_id?: number;
+    /**
+     * The color of this option in hex format, without the leading #.
+     */
+    hex_color?: string;
+    /**
+     * The unique, numeric id of this option.
+     */
+    readonly id?: number;
+    /**
+     * Whether this option is archived. Archived options can no longer be selected but continue to describe retained values.
+     */
+    is_archived?: boolean;
+    /**
+     * The display label of this option.
+     */
+    label?: string;
+    /**
+     * The immutable, definition-local machine key, using the same syntax as definition keys. It is the stable identity for duplication and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The position of this option, controlling display and multi-select response order.
+     */
+    position?: number;
+    /**
+     * A timestamp when this option was last updated. You cannot change this value.
+     */
+    readonly updated?: string;
+};
+
+export type CustomFieldOptionReadBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * A timestamp when this option was created. You cannot change this value.
+     */
+    readonly created?: string;
+    /**
+     * The definition this option belongs to. Only select definitions have options.
+     */
+    definition_id?: number;
+    /**
+     * The color of this option in hex format, without the leading #.
+     */
+    hex_color?: string;
+    /**
+     * The unique, numeric id of this option.
+     */
+    readonly id?: number;
+    /**
+     * Whether this option is archived. Archived options can no longer be selected but continue to describe retained values.
+     */
+    is_archived?: boolean;
+    /**
+     * The display label of this option.
+     */
+    label?: string;
+    /**
+     * The immutable, definition-local machine key, using the same syntax as definition keys. It is the stable identity for duplication and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The maximum permission the requesting user has on this option (0=read, 1=read/write, 2=admin).
+     */
+    readonly max_permission?: number;
+    /**
+     * The position of this option, controlling display and multi-select response order.
+     */
+    position?: number;
+    /**
+     * A timestamp when this option was last updated. You cannot change this value.
+     */
+    readonly updated?: string;
+};
+
+export type CustomFieldValue = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * Boolean value.
+     */
+    boolean?: boolean;
+    /**
+     * Date value in ISO 2006-01-02 form.
+     */
+    date?: string;
+    /**
+     * Date-time value, a UTC instant exchanged as RFC 3339.
+     */
+    datetime?: string;
+    /**
+     * Long text value, at most 65535 bytes.
+     */
+    long_text?: string;
+    /**
+     * Fixed-point number value, exact at the definition's precision.
+     */
+    number?: number;
+    /**
+     * Multi-select value, options of the definition. An empty array unsets the field.
+     */
+    option_ids?: Array<number> | null;
+    /**
+     * Short text value, at most 255 characters.
+     */
+    short_text?: string;
+    /**
+     * Single-select value, an option of the definition.
+     */
+    single_option_id?: number;
+    /**
+     * The type of this value. It must match the definition's immutable field type.
+     */
+    type?: string;
+    /**
+     * URL value, a validated absolute HTTP(S) URL of at most 2048 characters.
+     */
+    url?: string;
+    /**
+     * User value, an active user visible in the definition's project.
+     */
+    user_id?: number;
 };
 
 export type DatabaseNotification = {
@@ -1097,6 +1415,30 @@ export type PaginatedBucket = {
     total_pages?: number;
 };
 
+export type PaginatedCustomFieldDefinition = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items?: Array<CustomFieldDefinition> | null;
+    page?: number;
+    per_page?: number;
+    total?: number;
+    total_pages?: number;
+};
+
+export type PaginatedCustomFieldOption = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items?: Array<CustomFieldOption> | null;
+    page?: number;
+    per_page?: number;
+    total?: number;
+    total_pages?: number;
+};
+
 export type PaginatedDatabaseNotification = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1181,18 +1523,6 @@ export type PaginatedSession = {
     total_pages?: number;
 };
 
-export type PaginatedTask = {
-    /**
-     * A URL to the JSON Schema for this object.
-     */
-    readonly $schema?: string;
-    items?: Array<Task> | null;
-    page?: number;
-    per_page?: number;
-    total?: number;
-    total_pages?: number;
-};
-
 export type PaginatedTaskAttachment = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1211,6 +1541,18 @@ export type PaginatedTaskComment = {
      */
     readonly $schema?: string;
     items?: Array<TaskComment> | null;
+    page?: number;
+    per_page?: number;
+    total?: number;
+    total_pages?: number;
+};
+
+export type PaginatedTaskListItem = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items?: Array<TaskListItem> | null;
     page?: number;
     per_page?: number;
     total?: number;
@@ -2205,6 +2547,21 @@ export type TaskCommentReadBody = {
     readonly updated?: string;
 };
 
+export type TaskCustomFieldValueWithDefinition = {
+    /**
+     * The numeric id of the custom field definition this value belongs to.
+     */
+    definition_id?: number;
+    /**
+     * The immutable machine key of the definition. The stable identity for filtering, export, duplication, and moves.
+     */
+    machine_key?: string;
+    /**
+     * The typed value, self-describing via its type discriminant.
+     */
+    value?: CustomFieldValue;
+};
+
 export type TaskDuplicate = {
     /**
      * A URL to the JSON Schema for this object.
@@ -2214,6 +2571,144 @@ export type TaskDuplicate = {
      * The newly created duplicate task, populated by the server in the response.
      */
     readonly duplicated_task?: Task;
+    /**
+     * The project to duplicate the task into. Defaults to the original task's project.
+     */
+    project_id?: number;
+};
+
+export type TaskListItem = {
+    /**
+     * The users assigned to this task. Read-only here; use the task-assignee endpoints to change assignments.
+     */
+    readonly assignees?: Array<User> | null;
+    /**
+     * The task's attachments. Read-only here; use the attachment endpoints to add or remove them.
+     */
+    readonly attachments?: Array<TaskAttachment> | null;
+    /**
+     * The bucket the task is in. Only populated when the task is accessed via a view with buckets. To move a task between buckets, the new bucket must be in the same view as the old one.
+     */
+    bucket_id?: number;
+    /**
+     * The task's buckets across all views. Only present when requested via the buckets expand option.
+     */
+    readonly buckets?: Array<Bucket> | null;
+    /**
+     * The number of comments on this task. Only present when requested via the comment_count expand option.
+     */
+    readonly comment_count?: number;
+    /**
+     * The task's first 50 comments. Only present when requested via the comments expand option.
+     */
+    readonly comments?: Array<TaskComment> | null;
+    /**
+     * The id of the attachment used as this task's cover image, or 0 for none.
+     */
+    cover_image_attachment_id?: number;
+    /**
+     * When this task was created. Set by the server; ignored on write.
+     */
+    readonly created?: string;
+    /**
+     * The user who created this task. Set by the server.
+     */
+    readonly created_by?: User;
+    /**
+     * The custom field values of this task, ordered by definition position. Present as [] when the expand option is requested but the task has none.
+     */
+    readonly custom_fields?: Array<TaskCustomFieldValueWithDefinition>;
+    /**
+     * When this task was soft-deleted. Soft-deleted tasks are kept for 30 days before they are removed permanently.
+     */
+    readonly deleted_at?: string;
+    description?: string;
+    done?: boolean;
+    /**
+     * When the task was marked as done. Set by the server; ignored on write.
+     */
+    readonly done_at?: string;
+    due_date?: string;
+    end_date?: string;
+    /**
+     * The task color as a hex string without the leading '#'.
+     */
+    hex_color?: string;
+    /**
+     * The unique, numeric id of this task.
+     */
+    readonly id?: number;
+    /**
+     * The textual task identifier, derived from the project identifier and the task index (e.g. "PROJ-12").
+     */
+    readonly identifier?: string;
+    /**
+     * The per-project task index, assigned by the server.
+     */
+    readonly index?: number;
+    /**
+     * Whether the requesting user has favorited this task. Per-user, so it differs between callers.
+     */
+    is_favorite?: boolean;
+    /**
+     * Whether the task is unread for the requesting user. Only present when requested via the is_unread expand option.
+     */
+    readonly is_unread?: boolean;
+    /**
+     * The labels on this task. Read-only here; use the label-task endpoints to add or remove labels.
+     */
+    readonly labels?: Array<Label> | null;
+    /**
+     * How far the task is from done, between 0 and 1.
+     */
+    percent_done?: number;
+    /**
+     * The task's position, saved per view. Only non-zero when the task is fetched through a view endpoint; use the task-position endpoint to change it.
+     */
+    readonly position?: number;
+    priority?: number;
+    /**
+     * The id of the project this task belongs to. On create it is taken from the URL; on update, setting it to a different project moves the task (requires write access to the target project).
+     */
+    project_id?: number;
+    /**
+     * Reactions on this task. Only present when requested via the reactions expand option.
+     */
+    readonly reactions?: {
+        [key: string]: Array<User> | null;
+    };
+    /**
+     * Related tasks grouped by relation kind. Read-only here; use the task-relation endpoints to change relations.
+     */
+    readonly related_tasks?: {
+        [key: string]: Array<Task> | null;
+    };
+    reminders?: Array<TaskReminder> | null;
+    /**
+     * The interval in seconds this task repeats. When set, marking the task done re-opens it and bumps its reminders and due date by this amount.
+     */
+    repeat_after?: number;
+    /**
+     * How the task repeats when marked done: 0 = after repeat_after seconds, 1 = monthly (ignores repeat_after), 2 = from the current date rather than the last set date.
+     */
+    repeat_mode?: number;
+    start_date?: string;
+    /**
+     * The requesting user's subscription to this task. Read-only here; use the subscription endpoints to change it. Only present when reading a single task.
+     */
+    readonly subscription?: Subscription;
+    /**
+     * The number of time entries on this task. Only present when requested via the time_entries_count expand option.
+     */
+    readonly time_entries_count?: number;
+    /**
+     * The task title. This is what you'll see in the project.
+     */
+    title?: string;
+    /**
+     * When this task was last updated. Set by the server; ignored on write.
+     */
+    readonly updated?: string;
 };
 
 export type TaskPosition = {
@@ -2287,6 +2782,10 @@ export type TaskReadOneBody = {
      * The user who created this task. Set by the server.
      */
     readonly created_by?: User;
+    /**
+     * The custom field values of this task, ordered by definition position. Always present for user sessions and link shares (as [] when the task has none); present for API tokens only when the token has the custom_fields.read_all expansion scope.
+     */
+    readonly custom_fields?: Array<TaskCustomFieldValueWithDefinition>;
     /**
      * When this task was soft-deleted. Soft-deleted tasks are kept for 30 days before they are removed permanently.
      */
@@ -2415,6 +2914,17 @@ export type TaskReminder = {
     relative_period?: number;
     relative_to?: string;
     reminder?: string;
+};
+
+export type TasksDuplicateRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * The project to duplicate the task into. Defaults to the original task's project.
+     */
+    project_id?: number;
 };
 
 export type Team = {
@@ -3420,8 +3930,21 @@ export type BucketWritable = {
     updated?: string;
 };
 
+export type BucketWithTasksItemWritable = {
+    count?: number;
+    created?: string;
+    created_by?: UserWritable;
+    id?: number;
+    limit?: number;
+    position?: number;
+    project_view_id?: number;
+    tasks?: Array<TaskListItemWritable> | null;
+    title?: string;
+    updated?: string;
+};
+
 export type BucketsWithTasksBodyBodyWritable = {
-    items?: Array<BucketWritable> | null;
+    items?: Array<BucketWithTasksItemWritable> | null;
     /**
      * The number of buckets returned.
      */
@@ -3484,6 +4007,208 @@ export type CreateUserBodyWritable = {
      */
     skip_email_confirm?: boolean;
     username?: string;
+};
+
+export type CustomFieldDefinitionsPermanentDeleteRequestWritable = {
+    /**
+     * Delete values already stored on this definition as part of the operation. Permanently deleting a populated definition without this flag returns a conflict.
+     */
+    delete_values?: boolean;
+};
+
+export type CustomFieldDefinitionWritable = {
+    /**
+     * The validated, canonicalised per-type configuration, at most 16 KiB. Only number fields carry settings (precision plus optional min, max, step, and display unit).
+     */
+    configuration?: CustomFieldConfiguration;
+    /**
+     * A validated default value, materialised into a regular value row when a new task is created. Changing it is not retroactive and unsetting a task value does not reapply it.
+     */
+    default_value?: CustomFieldValueWritable;
+    /**
+     * A longer description of this definition, at most 4096 bytes.
+     */
+    description?: string;
+    /**
+     * The immutable type of the field. It selects which column of custom_field_values holds values and which editor the frontend uses; it never changes.
+     */
+    field_type?: string;
+    /**
+     * Whether this definition is archived. Archived definitions cannot receive new values but continue to describe retained ones.
+     */
+    is_archived?: boolean;
+    /**
+     * The immutable, project-local machine key. This is the stable identity used by the API, filters, exports, duplication, and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The position of this definition for ordering, following the usual Vikunja position convention.
+     */
+    position?: number;
+    /**
+     * The project this definition belongs to.
+     */
+    project_id?: number;
+    /**
+     * Whether this field is offered as a table column in views.
+     */
+    show_in_table?: boolean;
+    /**
+     * Whether values of this field are shown on task cards.
+     */
+    show_on_card?: boolean;
+    /**
+     * The display title of this definition.
+     */
+    title?: string;
+};
+
+export type CustomFieldDefinitionReadBodyWritable = {
+    /**
+     * The validated, canonicalised per-type configuration, at most 16 KiB. Only number fields carry settings (precision plus optional min, max, step, and display unit).
+     */
+    configuration?: CustomFieldConfiguration;
+    /**
+     * A validated default value, materialised into a regular value row when a new task is created. Changing it is not retroactive and unsetting a task value does not reapply it.
+     */
+    default_value?: CustomFieldValueWritable;
+    /**
+     * A longer description of this definition, at most 4096 bytes.
+     */
+    description?: string;
+    /**
+     * The immutable type of the field. It selects which column of custom_field_values holds values and which editor the frontend uses; it never changes.
+     */
+    field_type?: string;
+    /**
+     * Whether this definition is archived. Archived definitions cannot receive new values but continue to describe retained ones.
+     */
+    is_archived?: boolean;
+    /**
+     * The immutable, project-local machine key. This is the stable identity used by the API, filters, exports, duplication, and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The position of this definition for ordering, following the usual Vikunja position convention.
+     */
+    position?: number;
+    /**
+     * The project this definition belongs to.
+     */
+    project_id?: number;
+    /**
+     * Whether this field is offered as a table column in views.
+     */
+    show_in_table?: boolean;
+    /**
+     * Whether values of this field are shown on task cards.
+     */
+    show_on_card?: boolean;
+    /**
+     * The display title of this definition.
+     */
+    title?: string;
+};
+
+export type CustomFieldOptionWritable = {
+    /**
+     * The definition this option belongs to. Only select definitions have options.
+     */
+    definition_id?: number;
+    /**
+     * The color of this option in hex format, without the leading #.
+     */
+    hex_color?: string;
+    /**
+     * Whether this option is archived. Archived options can no longer be selected but continue to describe retained values.
+     */
+    is_archived?: boolean;
+    /**
+     * The display label of this option.
+     */
+    label?: string;
+    /**
+     * The immutable, definition-local machine key, using the same syntax as definition keys. It is the stable identity for duplication and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The position of this option, controlling display and multi-select response order.
+     */
+    position?: number;
+};
+
+export type CustomFieldOptionReadBodyWritable = {
+    /**
+     * The definition this option belongs to. Only select definitions have options.
+     */
+    definition_id?: number;
+    /**
+     * The color of this option in hex format, without the leading #.
+     */
+    hex_color?: string;
+    /**
+     * Whether this option is archived. Archived options can no longer be selected but continue to describe retained values.
+     */
+    is_archived?: boolean;
+    /**
+     * The display label of this option.
+     */
+    label?: string;
+    /**
+     * The immutable, definition-local machine key, using the same syntax as definition keys. It is the stable identity for duplication and moves; it never changes.
+     */
+    machine_key?: string;
+    /**
+     * The position of this option, controlling display and multi-select response order.
+     */
+    position?: number;
+};
+
+export type CustomFieldValueWritable = {
+    /**
+     * Boolean value.
+     */
+    boolean?: boolean;
+    /**
+     * Date value in ISO 2006-01-02 form.
+     */
+    date?: string;
+    /**
+     * Date-time value, a UTC instant exchanged as RFC 3339.
+     */
+    datetime?: string;
+    /**
+     * Long text value, at most 65535 bytes.
+     */
+    long_text?: string;
+    /**
+     * Fixed-point number value, exact at the definition's precision.
+     */
+    number?: number;
+    /**
+     * Multi-select value, options of the definition. An empty array unsets the field.
+     */
+    option_ids?: Array<number> | null;
+    /**
+     * Short text value, at most 255 characters.
+     */
+    short_text?: string;
+    /**
+     * Single-select value, an option of the definition.
+     */
+    single_option_id?: number;
+    /**
+     * The type of this value. It must match the definition's immutable field type.
+     */
+    type?: string;
+    /**
+     * URL value, a validated absolute HTTP(S) URL of at most 2048 characters.
+     */
+    url?: string;
+    /**
+     * User value, an active user visible in the definition's project.
+     */
+    user_id?: number;
 };
 
 export type DatabaseNotificationsWritable = {
@@ -3732,6 +4457,22 @@ export type PaginatedBucketWritable = {
     total_pages?: number;
 };
 
+export type PaginatedCustomFieldDefinitionWritable = {
+    items?: Array<CustomFieldDefinitionWritable> | null;
+    page?: number;
+    per_page?: number;
+    total?: number;
+    total_pages?: number;
+};
+
+export type PaginatedCustomFieldOptionWritable = {
+    items?: Array<CustomFieldOptionWritable> | null;
+    page?: number;
+    per_page?: number;
+    total?: number;
+    total_pages?: number;
+};
+
 export type PaginatedDatabaseNotificationWritable = {
     items?: Array<unknown> | null;
     page?: number;
@@ -3788,14 +4529,6 @@ export type PaginatedSessionWritable = {
     total_pages?: number;
 };
 
-export type PaginatedTaskWritable = {
-    items?: Array<TaskWritable> | null;
-    page?: number;
-    per_page?: number;
-    total?: number;
-    total_pages?: number;
-};
-
 export type PaginatedTaskAttachmentWritable = {
     items?: Array<TaskAttachmentWritable> | null;
     page?: number;
@@ -3806,6 +4539,14 @@ export type PaginatedTaskAttachmentWritable = {
 
 export type PaginatedTaskCommentWritable = {
     items?: Array<TaskCommentWritable> | null;
+    page?: number;
+    per_page?: number;
+    total?: number;
+    total_pages?: number;
+};
+
+export type PaginatedTaskListItemWritable = {
+    items?: Array<TaskListItemWritable> | null;
     page?: number;
     per_page?: number;
     total?: number;
@@ -4181,8 +4922,72 @@ export type TaskCommentReadBodyWritable = {
     comment?: string;
 };
 
+export type TaskCustomFieldValueWithDefinitionWritable = {
+    /**
+     * The numeric id of the custom field definition this value belongs to.
+     */
+    definition_id?: number;
+    /**
+     * The immutable machine key of the definition. The stable identity for filtering, export, duplication, and moves.
+     */
+    machine_key?: string;
+    /**
+     * The typed value, self-describing via its type discriminant.
+     */
+    value?: CustomFieldValueWritable;
+};
+
 export type TaskDuplicateWritable = {
-    [key: string]: never;
+    /**
+     * The project to duplicate the task into. Defaults to the original task's project.
+     */
+    project_id?: number;
+};
+
+export type TaskListItemWritable = {
+    /**
+     * The bucket the task is in. Only populated when the task is accessed via a view with buckets. To move a task between buckets, the new bucket must be in the same view as the old one.
+     */
+    bucket_id?: number;
+    /**
+     * The id of the attachment used as this task's cover image, or 0 for none.
+     */
+    cover_image_attachment_id?: number;
+    description?: string;
+    done?: boolean;
+    due_date?: string;
+    end_date?: string;
+    /**
+     * The task color as a hex string without the leading '#'.
+     */
+    hex_color?: string;
+    /**
+     * Whether the requesting user has favorited this task. Per-user, so it differs between callers.
+     */
+    is_favorite?: boolean;
+    /**
+     * How far the task is from done, between 0 and 1.
+     */
+    percent_done?: number;
+    priority?: number;
+    /**
+     * The id of the project this task belongs to. On create it is taken from the URL; on update, setting it to a different project moves the task (requires write access to the target project).
+     */
+    project_id?: number;
+    reminders?: Array<TaskReminder> | null;
+    /**
+     * The interval in seconds this task repeats. When set, marking the task done re-opens it and bumps its reminders and due date by this amount.
+     */
+    repeat_after?: number;
+    /**
+     * How the task repeats when marked done: 0 = after repeat_after seconds, 1 = monthly (ignores repeat_after), 2 = from the current date rather than the last set date.
+     */
+    repeat_mode?: number;
+    start_date?: string;
+    /**
+     * The task title. This is what you'll see in the project.
+     */
+    title?: string;
 };
 
 export type TaskPositionWritable = {
@@ -4251,6 +5056,13 @@ export type TaskRelationWritable = {
      * The kind of relation, describing the direction from the base task to the other task (e.g. subtask, blocking, related). The inverse relation is created automatically.
      */
     relation_kind?: 'subtask' | 'parenttask' | 'related' | 'duplicateof' | 'duplicates' | 'blocking' | 'blocked' | 'precedes' | 'follows' | 'copiedfrom' | 'copiedto';
+};
+
+export type TasksDuplicateRequestWritable = {
+    /**
+     * The project to duplicate the task into. Defaults to the original task's project.
+     */
+    project_id?: number;
 };
 
 export type TeamWritable = {
@@ -6783,6 +7595,436 @@ export type ProjectsBackgroundUploadResponses = {
 
 export type ProjectsBackgroundUploadResponse = ProjectsBackgroundUploadResponses[keyof ProjectsBackgroundUploadResponses];
 
+export type CustomFieldDefinitionsListData = {
+    body?: never;
+    path: {
+        project: number;
+    };
+    query?: {
+        include_archived?: boolean;
+        /**
+         * 1-based page number.
+         */
+        page?: number;
+        /**
+         * Items per page (max 1000).
+         */
+        per_page?: number;
+        /**
+         * Search query; filters the list to items matching this string.
+         */
+        q?: string;
+    };
+    url: '/projects/{project}/custom-field-definitions';
+};
+
+export type CustomFieldDefinitionsListErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldDefinitionsListError = CustomFieldDefinitionsListErrors[keyof CustomFieldDefinitionsListErrors];
+
+export type CustomFieldDefinitionsListResponses = {
+    /**
+     * OK
+     */
+    200: PaginatedCustomFieldDefinition;
+};
+
+export type CustomFieldDefinitionsListResponse = CustomFieldDefinitionsListResponses[keyof CustomFieldDefinitionsListResponses];
+
+export type CustomFieldDefinitionsCreateData = {
+    body: CustomFieldDefinitionWritable;
+    path: {
+        project: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions';
+};
+
+export type CustomFieldDefinitionsCreateErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldDefinitionsCreateError = CustomFieldDefinitionsCreateErrors[keyof CustomFieldDefinitionsCreateErrors];
+
+export type CustomFieldDefinitionsCreateResponses = {
+    /**
+     * Created
+     */
+    201: CustomFieldDefinition;
+};
+
+export type CustomFieldDefinitionsCreateResponse = CustomFieldDefinitionsCreateResponses[keyof CustomFieldDefinitionsCreateResponses];
+
+export type CustomFieldDefinitionsDeleteData = {
+    body?: never;
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}';
+};
+
+export type CustomFieldDefinitionsDeleteErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldDefinitionsDeleteError = CustomFieldDefinitionsDeleteErrors[keyof CustomFieldDefinitionsDeleteErrors];
+
+export type CustomFieldDefinitionsDeleteResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type CustomFieldDefinitionsDeleteResponse = CustomFieldDefinitionsDeleteResponses[keyof CustomFieldDefinitionsDeleteResponses];
+
+export type CustomFieldDefinitionsReadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Succeeds if the server's resource matches one of the passed values.
+         */
+        'If-Match'?: Array<string> | null;
+        /**
+         * Succeeds if the server's resource matches none of the passed values. On writes, the special value * may be used to match any existing value.
+         */
+        'If-None-Match'?: Array<string> | null;
+        /**
+         * Succeeds if the server's resource date is more recent than the passed date.
+         */
+        'If-Modified-Since'?: string;
+        /**
+         * Succeeds if the server's resource date is older or the same as the passed date.
+         */
+        'If-Unmodified-Since'?: string;
+    };
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}';
+};
+
+export type CustomFieldDefinitionsReadErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldDefinitionsReadError = CustomFieldDefinitionsReadErrors[keyof CustomFieldDefinitionsReadErrors];
+
+export type CustomFieldDefinitionsReadResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldDefinitionReadBody;
+};
+
+export type CustomFieldDefinitionsReadResponse = CustomFieldDefinitionsReadResponses[keyof CustomFieldDefinitionsReadResponses];
+
+export type PatchCustomFieldDefinitionsReadData = {
+    body: Array<JsonPatchOp> | null;
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}';
+};
+
+export type PatchCustomFieldDefinitionsReadErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type PatchCustomFieldDefinitionsReadError = PatchCustomFieldDefinitionsReadErrors[keyof PatchCustomFieldDefinitionsReadErrors];
+
+export type PatchCustomFieldDefinitionsReadResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldDefinition;
+};
+
+export type PatchCustomFieldDefinitionsReadResponse = PatchCustomFieldDefinitionsReadResponses[keyof PatchCustomFieldDefinitionsReadResponses];
+
+export type CustomFieldDefinitionsUpdateData = {
+    body: CustomFieldDefinitionReadBodyWritable;
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}';
+};
+
+export type CustomFieldDefinitionsUpdateErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldDefinitionsUpdateError = CustomFieldDefinitionsUpdateErrors[keyof CustomFieldDefinitionsUpdateErrors];
+
+export type CustomFieldDefinitionsUpdateResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldDefinition;
+};
+
+export type CustomFieldDefinitionsUpdateResponse = CustomFieldDefinitionsUpdateResponses[keyof CustomFieldDefinitionsUpdateResponses];
+
+export type CustomFieldOptionsListData = {
+    body?: never;
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: {
+        include_archived?: boolean;
+        /**
+         * 1-based page number.
+         */
+        page?: number;
+        /**
+         * Items per page (max 1000).
+         */
+        per_page?: number;
+        /**
+         * Search query; filters the list to items matching this string.
+         */
+        q?: string;
+    };
+    url: '/projects/{project}/custom-field-definitions/{definition}/options';
+};
+
+export type CustomFieldOptionsListErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldOptionsListError = CustomFieldOptionsListErrors[keyof CustomFieldOptionsListErrors];
+
+export type CustomFieldOptionsListResponses = {
+    /**
+     * OK
+     */
+    200: PaginatedCustomFieldOption;
+};
+
+export type CustomFieldOptionsListResponse = CustomFieldOptionsListResponses[keyof CustomFieldOptionsListResponses];
+
+export type CustomFieldOptionsCreateData = {
+    body: CustomFieldOptionWritable;
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}/options';
+};
+
+export type CustomFieldOptionsCreateErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldOptionsCreateError = CustomFieldOptionsCreateErrors[keyof CustomFieldOptionsCreateErrors];
+
+export type CustomFieldOptionsCreateResponses = {
+    /**
+     * Created
+     */
+    201: CustomFieldOption;
+};
+
+export type CustomFieldOptionsCreateResponse = CustomFieldOptionsCreateResponses[keyof CustomFieldOptionsCreateResponses];
+
+export type CustomFieldOptionsDeleteData = {
+    body?: never;
+    path: {
+        project: number;
+        definition: number;
+        option: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}/options/{option}';
+};
+
+export type CustomFieldOptionsDeleteErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldOptionsDeleteError = CustomFieldOptionsDeleteErrors[keyof CustomFieldOptionsDeleteErrors];
+
+export type CustomFieldOptionsDeleteResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type CustomFieldOptionsDeleteResponse = CustomFieldOptionsDeleteResponses[keyof CustomFieldOptionsDeleteResponses];
+
+export type CustomFieldOptionsReadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Succeeds if the server's resource matches one of the passed values.
+         */
+        'If-Match'?: Array<string> | null;
+        /**
+         * Succeeds if the server's resource matches none of the passed values. On writes, the special value * may be used to match any existing value.
+         */
+        'If-None-Match'?: Array<string> | null;
+        /**
+         * Succeeds if the server's resource date is more recent than the passed date.
+         */
+        'If-Modified-Since'?: string;
+        /**
+         * Succeeds if the server's resource date is older or the same as the passed date.
+         */
+        'If-Unmodified-Since'?: string;
+    };
+    path: {
+        project: number;
+        definition: number;
+        option: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}/options/{option}';
+};
+
+export type CustomFieldOptionsReadErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldOptionsReadError = CustomFieldOptionsReadErrors[keyof CustomFieldOptionsReadErrors];
+
+export type CustomFieldOptionsReadResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldOptionReadBody;
+};
+
+export type CustomFieldOptionsReadResponse = CustomFieldOptionsReadResponses[keyof CustomFieldOptionsReadResponses];
+
+export type PatchCustomFieldOptionsReadData = {
+    body: Array<JsonPatchOp> | null;
+    path: {
+        project: number;
+        definition: number;
+        option: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}/options/{option}';
+};
+
+export type PatchCustomFieldOptionsReadErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type PatchCustomFieldOptionsReadError = PatchCustomFieldOptionsReadErrors[keyof PatchCustomFieldOptionsReadErrors];
+
+export type PatchCustomFieldOptionsReadResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldOption;
+};
+
+export type PatchCustomFieldOptionsReadResponse = PatchCustomFieldOptionsReadResponses[keyof PatchCustomFieldOptionsReadResponses];
+
+export type CustomFieldOptionsUpdateData = {
+    body: CustomFieldOptionReadBodyWritable;
+    path: {
+        project: number;
+        definition: number;
+        option: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}/options/{option}';
+};
+
+export type CustomFieldOptionsUpdateErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldOptionsUpdateError = CustomFieldOptionsUpdateErrors[keyof CustomFieldOptionsUpdateErrors];
+
+export type CustomFieldOptionsUpdateResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldOption;
+};
+
+export type CustomFieldOptionsUpdateResponse = CustomFieldOptionsUpdateResponses[keyof CustomFieldOptionsUpdateResponses];
+
+export type CustomFieldDefinitionsPermanentDeleteData = {
+    body: CustomFieldDefinitionsPermanentDeleteRequestWritable;
+    path: {
+        project: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/projects/{project}/custom-field-definitions/{definition}/permanent-delete';
+};
+
+export type CustomFieldDefinitionsPermanentDeleteErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldDefinitionsPermanentDeleteError = CustomFieldDefinitionsPermanentDeleteErrors[keyof CustomFieldDefinitionsPermanentDeleteErrors];
+
+export type CustomFieldDefinitionsPermanentDeleteResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type CustomFieldDefinitionsPermanentDeleteResponse = CustomFieldDefinitionsPermanentDeleteResponses[keyof CustomFieldDefinitionsPermanentDeleteResponses];
+
 export type SharesListData = {
     body?: never;
     path: {
@@ -6958,7 +8200,7 @@ export type ProjectTasksListData = {
          */
         filter_include_nulls?: boolean;
         /**
-         * Fields to sort by (e.g. done, priority). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
+         * Fields to sort by (e.g. done, priority, or custom_fields.<machine_key> for a custom field). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
          */
         sort_by?: Array<string> | null;
         /**
@@ -6968,7 +8210,7 @@ export type ProjectTasksListData = {
         /**
          * Embed extra, more expensive data per task. Repeatable.
          */
-        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread'> | null;
+        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread' | 'custom_fields'> | null;
         /**
          * How rich-text fields are exchanged. See the API description.
          */
@@ -6990,7 +8232,7 @@ export type ProjectTasksListResponses = {
     /**
      * OK
      */
-    200: PaginatedTask;
+    200: PaginatedTaskListItem;
 };
 
 export type ProjectTasksListResponse = ProjectTasksListResponses[keyof ProjectTasksListResponses];
@@ -7097,9 +8339,9 @@ export type TasksReadByIndexData = {
     };
     query?: {
         /**
-         * Embed extra data per task. Repeatable.
+         * Embed extra data per task. Repeatable. For single-task reads, custom field values are always included for user sessions and link shares; API tokens need the custom_fields.read_all expansion scope.
          */
-        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread'> | null;
+        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread' | 'custom_fields'> | null;
         /**
          * How rich-text fields are exchanged. See the API description.
          */
@@ -7708,7 +8950,7 @@ export type ProjectViewBucketsTasksListData = {
          */
         filter_include_nulls?: boolean;
         /**
-         * Fields to sort by (e.g. done, priority). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
+         * Fields to sort by (e.g. done, priority, or custom_fields.<machine_key> for a custom field). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
          */
         sort_by?: Array<string> | null;
         /**
@@ -7718,7 +8960,7 @@ export type ProjectViewBucketsTasksListData = {
         /**
          * Embed extra, more expensive data per task. Repeatable.
          */
-        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread'> | null;
+        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread' | 'custom_fields'> | null;
         /**
          * How rich-text fields are exchanged. See the API description.
          */
@@ -7870,7 +9112,7 @@ export type ProjectViewTasksListData = {
          */
         filter_include_nulls?: boolean;
         /**
-         * Fields to sort by (e.g. done, priority). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
+         * Fields to sort by (e.g. done, priority, or custom_fields.<machine_key> for a custom field). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
          */
         sort_by?: Array<string> | null;
         /**
@@ -7880,7 +9122,7 @@ export type ProjectViewTasksListData = {
         /**
          * Embed extra, more expensive data per task. Repeatable.
          */
-        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread'> | null;
+        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread' | 'custom_fields'> | null;
         /**
          * How rich-text fields are exchanged. See the API description.
          */
@@ -7902,7 +9144,7 @@ export type ProjectViewTasksListResponses = {
     /**
      * OK
      */
-    200: PaginatedTask;
+    200: PaginatedTaskListItem;
 };
 
 export type ProjectViewTasksListResponse = ProjectViewTasksListResponses[keyof ProjectViewTasksListResponses];
@@ -8211,7 +9453,7 @@ export type TasksListData = {
          */
         filter_include_nulls?: boolean;
         /**
-         * Fields to sort by (e.g. done, priority). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
+         * Fields to sort by (e.g. done, priority, or custom_fields.<machine_key> for a custom field). Repeatable; pair positionally with order_by. The special value relevance sorts by search relevance (most relevant first, requires s; ignored when the database cannot score the query).
          */
         sort_by?: Array<string> | null;
         /**
@@ -8221,7 +9463,7 @@ export type TasksListData = {
         /**
          * Embed extra, more expensive data per task. Repeatable.
          */
-        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread'> | null;
+        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread' | 'custom_fields'> | null;
         /**
          * How rich-text fields are exchanged. See the API description.
          */
@@ -8243,7 +9485,7 @@ export type TasksListResponses = {
     /**
      * OK
      */
-    200: PaginatedTask;
+    200: PaginatedTaskListItem;
 };
 
 export type TasksListResponse = TasksListResponses[keyof TasksListResponses];
@@ -8333,9 +9575,9 @@ export type TasksReadData = {
     };
     query?: {
         /**
-         * Embed extra data per task. Repeatable.
+         * Embed extra data per task. Repeatable. For single-task reads, custom field values are always included for user sessions and link shares; API tokens need the custom_fields.read_all expansion scope.
          */
-        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread'> | null;
+        expand?: Array<'subtasks' | 'buckets' | 'reactions' | 'comments' | 'comment_count' | 'time_entries_count' | 'is_unread' | 'custom_fields'> | null;
         /**
          * How rich-text fields are exchanged. See the API description.
          */
@@ -8544,7 +9786,7 @@ export type TaskAssigneesDeleteResponses = {
 export type TaskAssigneesDeleteResponse = TaskAssigneesDeleteResponses[keyof TaskAssigneesDeleteResponses];
 
 export type TasksDuplicateData = {
-    body?: never;
+    body?: TasksDuplicateRequestWritable;
     path: {
         /**
          * The numeric id of the task to duplicate.
@@ -9135,6 +10377,62 @@ export type TaskCommentsUpdateResponses = {
 };
 
 export type TaskCommentsUpdateResponse = TaskCommentsUpdateResponses[keyof TaskCommentsUpdateResponses];
+
+export type CustomFieldValuesUnsetData = {
+    body?: never;
+    path: {
+        task: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/tasks/{task}/custom-field-values/{definition}';
+};
+
+export type CustomFieldValuesUnsetErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldValuesUnsetError = CustomFieldValuesUnsetErrors[keyof CustomFieldValuesUnsetErrors];
+
+export type CustomFieldValuesUnsetResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type CustomFieldValuesUnsetResponse = CustomFieldValuesUnsetResponses[keyof CustomFieldValuesUnsetResponses];
+
+export type CustomFieldValuesSetData = {
+    body: CustomFieldValueWritable;
+    path: {
+        task: number;
+        definition: number;
+    };
+    query?: never;
+    url: '/tasks/{task}/custom-field-values/{definition}';
+};
+
+export type CustomFieldValuesSetErrors = {
+    /**
+     * Error
+     */
+    default: VikunjaErrorModel;
+};
+
+export type CustomFieldValuesSetError = CustomFieldValuesSetErrors[keyof CustomFieldValuesSetErrors];
+
+export type CustomFieldValuesSetResponses = {
+    /**
+     * OK
+     */
+    200: CustomFieldValue;
+};
+
+export type CustomFieldValuesSetResponse = CustomFieldValuesSetResponses[keyof CustomFieldValuesSetResponses];
 
 export type TasksPositionUpdateData = {
     body: TaskPositionWritable;

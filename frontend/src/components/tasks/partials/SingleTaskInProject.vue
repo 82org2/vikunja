@@ -139,6 +139,20 @@
 				</span>
 
 				<ChecklistSummary :task="task" />
+
+				<div
+					v-if="showCustomFields && cardCustomFields.length > 0"
+					class="custom-field-metadata"
+				>
+					<span
+						v-for="cf in cardCustomFields"
+						:key="cf.definition.id"
+						class="custom-field-metadata__item"
+					>
+						<span class="custom-field-metadata__label">{{ cf.definition.title }}:</span>
+						<CustomFieldValueInline :value="cf.value?.value" />
+					</span>
+				</div>
 			</div>
 
 			<ProgressBar
@@ -225,6 +239,8 @@ import {success} from '@/message'
 import {useProjectStore} from '@/stores/projects'
 import {useBaseStore} from '@/stores/base'
 import {useTaskStore} from '@/stores/tasks'
+import {useCustomFieldRegistryStore} from '@/stores/customFieldRegistry'
+import CustomFieldValueInline from '@/components/tasks/partials/CustomFieldValueInline.vue'
 import AssigneeList from '@/components/tasks/partials/AssigneeList.vue'
 import {useIntervalFn} from '@vueuse/core'
 import {playPopSound} from '@/helpers/playPop'
@@ -239,12 +255,14 @@ const props = withDefaults(defineProps<{
 	disabled?: boolean,
 	canMarkAsDone?: boolean,
 	allTasks?: ITask[],
+	showCustomFields?: boolean,
 }>(), {
 	isArchived: false,
 	showProject: false,
 	disabled: false,
 	canMarkAsDone: true,
 	allTasks: () => [],
+	showCustomFields: false,
 })
 
 const emit = defineEmits<{
@@ -280,6 +298,15 @@ watch(
 const baseStore = useBaseStore()
 const projectStore = useProjectStore()
 const taskStore = useTaskStore()
+const registry = useCustomFieldRegistryStore()
+
+const cardCustomFields = computed(() => {
+	if (!props.showCustomFields || !task.value.projectId) {
+		return []
+	}
+	return registry.mergeTaskValues(task.value.projectId, task.value.customFields ?? [])
+		.filter(entry => entry.definition.showOnCard && entry.value)
+})
 
 const project = computed(() => projectStore.projects[task.value.projectId])
 const projectColor = computed(() => project.value ? project.value?.hexColor : '')

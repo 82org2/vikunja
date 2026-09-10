@@ -56,8 +56,13 @@ import XButton from '@/components/input/Button.vue'
 import Popup from '@/components/misc/Popup.vue'
 import Card from '@/components/misc/Card.vue'
 import type {SortBy} from '@/composables/useTaskList'
+import type {ICustomFieldDefinition} from '@/modelTypes/ICustomFieldDefinition'
+import {isCustomFieldSortable} from '@/modelTypes/ICustomFieldValue'
 
-const props = defineProps<{ modelValue: SortBy }>()
+const props = defineProps<{
+	modelValue: SortBy,
+	customFieldDefinitions?: ICustomFieldDefinition[],
+}>()
 const emit = defineEmits<{ 'update:modelValue': [value: SortBy] }>()
 
 const {t} = useI18n({useScope: 'global'})
@@ -94,9 +99,18 @@ const options = computed(() => {
 		{value: 'created:asc', label: t('sorting.options.createdAsc')},
 		{value: 'updated:desc', label: t('sorting.options.updatedDesc')},
 		{value: 'updated:asc', label: t('sorting.options.updatedAsc')},
-	].sort((a, b) => a.label.localeCompare(b.label))
+	]
 
-	return [manual, ...rest]
+	// Custom-field sort options: only sortable types (short text, number,
+	// boolean, date, datetime, user, single select) are offered.
+	const customFieldOptions = (props.customFieldDefinitions ?? [])
+		.filter(d => isCustomFieldSortable(d.fieldType))
+		.flatMap(d => [
+			{value: `custom_fields.${d.machineKey}:asc`, label: `${d.title} ↑`},
+			{value: `custom_fields.${d.machineKey}:desc`, label: `${d.title} ↓`},
+		])
+
+	return [manual, ...rest, ...customFieldOptions].sort((a, b) => a.label.localeCompare(b.label))
 })
 
 function applySort(close: () => void) {

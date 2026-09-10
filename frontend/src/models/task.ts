@@ -11,6 +11,7 @@ import type {IRepeatAfter} from '@/types/IRepeatAfter'
 import type {IRelationKind} from '@/types/IRelationKind'
 import {TASK_REPEAT_MODES, type IRepeatMode} from '@/types/IRepeatMode'
 import type {Label} from '@/client/generated'
+import type {ITaskCustomFieldValue} from '@/modelTypes/ICustomFieldValue'
 
 import {parseDateOrNull} from '@/helpers/parseDateOrNull'
 import {secondsToPeriod} from '@/helpers/time/period'
@@ -99,6 +100,8 @@ export default class TaskModel extends AbstractModel<ITask> implements ITask {
 	bucketId: IBucket['id'] = 0
 	buckets: IBucket[] = []
 
+	customFields: ITaskCustomFieldValue[] = []
+
 	constructor(data: Partial<ITask> = {}) {
 		super()
 		const labels = (data.labels ?? []).map(label => objectToSnakeCase(label) as Label)
@@ -153,6 +156,12 @@ export default class TaskModel extends AbstractModel<ITask> implements ITask {
 		this.updated = new Date(this.updated)
 
 		this.projectId = Number(this.projectId)
+
+		this.customFields = (this.customFields ?? []).map(cf => ({
+			definitionId: Number(cf.definitionId),
+			machineKey: cf.machineKey,
+			value: cf.value,
+		}))
 
 		// If we would use the camel cased value here, it would lose the reactions - emojis can't be camel cased.
 		// The comments will be camel cased anyway in the constructor of the task comment model.

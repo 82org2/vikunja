@@ -562,6 +562,54 @@
       "secretHint": "If provided, all requests to the webhook target URL will be signed using HMAC.",
       "secretDocs": "Check out the docs for more details about how to use secrets."
     },
+    "customFields": {
+      "title": "Custom Fields",
+      "create": "Create custom field",
+      "edit": "Edit custom field",
+      "title": "Title",
+      "description": "Description",
+      "machineKey": "Machine key",
+      "fieldType": "Field type",
+      "precision": "Precision",
+      "min": "Minimum",
+      "max": "Maximum",
+      "step": "Step",
+      "unit": "Unit",
+      "showOnCard": "Show on task cards",
+      "showInTable": "Show in table",
+      "status": "Status",
+      "active": "Active",
+      "archived": "Archived",
+      "actions": "Actions",
+      "options": "Options",
+      "optionLabel": "Label",
+      "optionColor": "Color",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "delete": "Delete permanently",
+      "deleteText": "Are you sure you want to permanently delete this custom field? This cannot be undone.",
+      "deleteValues": "Delete all values stored on this field as part of the operation",
+      "deleteSuccess": "The custom field was permanently deleted.",
+      "archiveSuccess": "The custom field was archived.",
+      "unarchiveSuccess": "The custom field was unarchived.",
+      "createSuccess": "The custom field was created successfully.",
+      "updateSuccess": "The custom field was updated successfully.",
+      "optionCreateSuccess": "The option was created successfully.",
+      "optionUpdateSuccess": "The option was updated successfully.",
+      "onlyAdminsCanEdit": "Only project administrators can manage custom fields.",
+      "types": {
+        "short_text": "Short text",
+        "long_text": "Long text",
+        "number": "Number",
+        "boolean": "Boolean",
+        "date": "Date",
+        "datetime": "Date & time",
+        "url": "URL",
+        "single_select": "Single select",
+        "multi_select": "Multi select",
+        "user": "User"
+      }
+    },
     "views": {
       "header": "Edit views",
       "title": "Title",
@@ -1064,8 +1112,13 @@
         "color": "Set Color",
         "delete": "Delete",
         "favorite": "Add to Favorites",
-        "unfavorite": "Remove from Favorites"
+        "unfavorite": "Remove from Favorites",
+        "customFields": "Custom Fields"
       }
+    },
+    "customFields": {
+      "title": "Custom Fields",
+      "unset": "Unset"
     },
     "attributes": {
       "assignees": "Assignees",
@@ -1089,7 +1142,8 @@
       "startDate": "Start Date",
       "title": "Title",
       "updated": "Updated",
-      "doneAt": "Done At"
+      "doneAt": "Done At",
+      "customFields": "Custom Fields"
     },
     "subscription": {
       "subscribedTaskThroughProject": "You are subscribed to this task through its project. Unsubscribing here only stops notifications for this task.",

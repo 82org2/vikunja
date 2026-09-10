@@ -16,6 +16,7 @@ import type {ITaskReminder} from '@/modelTypes/ITaskReminder'
 import type {IReactionPerEntity} from '@/modelTypes/IReaction'
 import type {ITaskComment} from '@/modelTypes/ITaskComment.ts'
 import type {Label} from '@/client/generated'
+import type {ITaskCustomFieldValue} from '@/modelTypes/ICustomFieldValue'
 
 export interface ITask extends IAbstract {
 	id: number
@@ -61,6 +62,8 @@ export interface ITask extends IAbstract {
 	projectId: IProject['id'] // Meta, only used when creating a new task
 	bucketId: IBucket['id']
 	buckets: IBucket[]
+
+	customFields: ITaskCustomFieldValue[]
 }
 
 export type ITaskPartialWithId = PartialWithId<ITask>

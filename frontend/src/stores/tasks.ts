@@ -172,12 +172,8 @@ export const useTaskStore = defineStore('task', () => {
 
 		const cancel = setModuleLoading(setIsLoading)
 		try {
-			const model = {}
-			let taskCollectionService = new TaskService()
-			if (projectId !== null) {
-				model.projectId = projectId
-				taskCollectionService = new TaskCollectionService()
-			}
+			const model = projectId !== null ? {projectId} : {}
+			const taskCollectionService = new TaskCollectionService()
 			tasks.value = await taskCollectionService.getAll(model, params)
 			baseStore.setHasTasks(tasks.value.length > 0)
 			return tasks.value

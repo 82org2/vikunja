@@ -338,6 +338,25 @@
 						/>
 					</div>
 
+					<!-- Custom Fields -->
+					<div
+						v-if="activeFields.customFields"
+						class="content details custom-fields"
+					>
+						<h2 class="task-section-title">
+							<span class="icon is-grey">
+								<Icon icon="sliders-h" />
+							</span>
+							{{ $t('task.customFields.title') }}
+						</h2>
+						<CustomFieldEditors
+							:ref="e => setFieldRef('customFields', e)"
+							:task="task"
+							:can-write="canWrite"
+							@valueChanged="onCustomFieldValueChanged"
+						/>
+					</div>
+
 					<!-- Description -->
 					<div class="details content description">
 						<Description
@@ -599,6 +618,13 @@
 							{{ $t('task.detail.actions.repeatAfter') }}
 						</XButton>
 						<XButton
+							variant="secondary"
+							icon="sliders-h"
+							@click="setFieldActive('customFields')"
+						>
+							{{ $t('task.detail.actions.customFields') }}
+						</XButton>
+						<XButton
 							v-shortcut="SHORTCUTS.taskDetail.delete"
 							icon="trash-alt"
 							:shadow="false"
@@ -664,6 +690,7 @@ import TaskModel from '@/models/task'
 import type {ITask} from '@/modelTypes/ITask'
 import type {IAttachment} from '@/modelTypes/IAttachment'
 import type {IProject} from '@/modelTypes/IProject'
+import type {ITaskCustomFieldValue} from '@/modelTypes/ICustomFieldValue'
 
 import {PRIORITIES, type Priority} from '@/constants/priorities'
 import {PERMISSIONS} from '@/constants/permissions'
@@ -695,6 +722,7 @@ import CustomTransition from '@/components/misc/CustomTransition.vue'
 import AssigneeList from '@/components/tasks/partials/AssigneeList.vue'
 import BucketSelect from '@/components/tasks/partials/BucketSelect.vue'
 import Reactions from '@/components/input/Reactions.vue'
+import CustomFieldEditors from '@/components/tasks/partials/CustomFieldEditors.vue'
 
 import {uploadFile} from '@/helpers/attachments'
 import {getProjectTitle} from '@/helpers/getProjectTitle'
@@ -945,12 +973,12 @@ watch(
 		}
 
 		try {
-			const expand = ['reactions', 'comments', 'is_unread', 'buckets']
+			const expand = ['reactions', 'comments', 'is_unread', 'buckets', 'custom_fields']
 			if (timeTrackingEnabled.value) {
 				// Only request the (server-computed) count when the feature is on.
 				expand.push('time_entries_count')
 			}
-			const loaded = await taskService.get({id}, {expand})
+			const loaded = await taskService.getV2(id, expand)
 			Object.assign(task.value, loaded)
 			taskColor.value = task.value.hexColor
 			setActiveFields()
@@ -986,6 +1014,7 @@ type FieldType =
 	| 'assignees'
 	| 'attachments'
 	| 'color'
+	| 'customFields'
 	| 'dueDate'
 	| 'endDate'
 	| 'labels'
@@ -1002,6 +1031,7 @@ const activeFields: { [type in FieldType]: boolean } = reactive({
 	assignees: false,
 	attachments: false,
 	color: false,
+	customFields: false,
 	dueDate: false,
 	endDate: false,
 	labels: false,
@@ -1033,12 +1063,14 @@ function setActiveFields() {
 	activeFields.reminders = task.value.reminders.length > 0
 	activeFields.repeatAfter = task.value.repeatAfter?.amount > 0 || task.value.repeatMode !== TASK_REPEAT_MODES.REPEAT_MODE_DEFAULT
 	activeFields.startDate = task.value.startDate !== null
+	activeFields.customFields = (task.value.customFields?.length ?? 0) > 0
 }
 
 const activeFieldElements: { [id in FieldType]: HTMLElement | null } = reactive({
 	assignees: null,
 	attachments: null,
 	color: null,
+	customFields: null,
 	dueDate: null,
 	endDate: null,
 	labels: null,
@@ -1049,6 +1081,7 @@ const activeFieldElements: { [id in FieldType]: HTMLElement | null } = reactive(
 	reminders: null,
 	repeatAfter: null,
 	startDate: null,
+	timeTracking: null,
 })
 
 function setFieldRef(name, e) {
@@ -1080,6 +1113,25 @@ function openAttachments() {
 		}
 		attachmentsRef.value?.openFilePicker()
 	})
+}
+
+// Custom field value writes return the canonical value, not a refreshed task.
+// Update the local task's customFields array in place so the detail view, list,
+// and kanban stores stay in sync without a full reload.
+function onCustomFieldValueChanged({definitionId, value}: {definitionId: number, value: ITaskCustomFieldValue | null}) {
+	const fields = task.value.customFields ?? []
+	const index = fields.findIndex(f => f.definitionId === definitionId)
+	if (value === null) {
+		if (index !== -1) {
+			fields.splice(index, 1)
+		}
+	} else if (index !== -1) {
+		fields[index] = value
+	} else {
+		fields.push(value)
+	}
+	task.value.customFields = [...fields]
+	setActiveFields()
 }
 
 async function saveTask(

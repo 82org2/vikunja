@@ -71,6 +71,14 @@
 							<FancyCheckbox v-model="activeColumns.createdBy">
 								{{ $t('task.attributes.createdBy') }}
 							</FancyCheckbox>
+							<FancyCheckbox
+								v-for="def in customFieldColumns"
+								:key="def.id"
+								:model-value="activeColumns[customFieldColumnKey(def.id)]"
+								@update:modelValue="v => activeColumns[customFieldColumnKey(def.id)] = v"
+							>
+								{{ def.title }}
+							</FancyCheckbox>
 						</Card>
 					</template>
 				</Popup>
@@ -233,6 +241,19 @@
 									<th v-if="activeColumns.createdBy">
 										{{ $t('task.attributes.createdBy') }}
 									</th>
+									<th
+										v-for="def in visibleCustomFieldColumns"
+										:key="def.id"
+										:aria-sort="isCustomFieldSortable(def.fieldType) ? ariaSort(customFieldSortOrder(def)) : undefined"
+									>
+										{{ def.title }}
+										<Sort
+											v-if="isCustomFieldSortable(def.fieldType)"
+											:order="customFieldSortOrder(def)"
+											:label="def.title"
+											@click="sort(customFieldSortKey(def), $event)"
+										/>
+									</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -322,6 +343,12 @@
 											:user="t.createdBy"
 										/>
 									</td>
+									<CustomFieldTableCell
+										v-for="def in visibleCustomFieldColumns"
+										:key="def.id"
+										:value="taskCustomFieldValue(t, def.id)"
+										:definition-id="def.id"
+									/>
 								</tr>
 							</tbody>
 						</table>
@@ -361,11 +388,14 @@ import {useTaskList} from '@/composables/useTaskList'
 import type {ITask} from '@/modelTypes/ITask'
 import type {IProject} from '@/modelTypes/IProject'
 import AssigneeList from '@/components/tasks/partials/AssigneeList.vue'
+import CustomFieldTableCell from '@/components/tasks/partials/CustomFieldTableCell.vue'
 import type {IProjectView} from '@/modelTypes/IProjectView'
 import {getTaskIdentifier} from '@/models/task'
 import { camelCase } from 'change-case'
 import {isSavedFilter} from '@/services/savedFilter'
 import {useProjectStore} from '@/stores/projects'
+import {useCustomFieldRegistryStore} from '@/stores/customFieldRegistry'
+import {isCustomFieldSortable} from '@/modelTypes/ICustomFieldValue'
 
 const props = defineProps<{
 	isLoadingProject: boolean,
@@ -374,6 +404,7 @@ const props = defineProps<{
 }>()
 
 const projectStore = useProjectStore()
+const registry = useCustomFieldRegistryStore()
 
 const ACTIVE_COLUMNS_DEFAULT = {
 	index: true,
@@ -398,14 +429,42 @@ const SORT_BY_DEFAULT: SortBy = {
 	index: 'desc',
 }
 
-const activeColumns = useStorage('tableViewColumns', {...ACTIVE_COLUMNS_DEFAULT})
+// Custom-field columns are keyed by `custom_fields.<machine_key>` and their
+// enabled state is stored per project + definition id so the same machine key
+// in different projects never collides.
+const customFieldColumns = computed(() => registry.getDefinitionsForProject(props.projectId)
+	.filter(d => d.showInTable))
+
+const visibleCustomFieldColumns = computed(() => customFieldColumns.value
+	.filter(d => activeColumns.value[customFieldColumnKey(d.id)]))
+
+const customFieldColumnKey = (defId: number) => `customField_${defId}`
+
+const activeColumns = useStorage<Record<string, boolean>>('tableViewColumns', {...ACTIVE_COLUMNS_DEFAULT})
 const sortBy = useStorage<SortBy>('tableViewSortBy', {...SORT_BY_DEFAULT})
+
+watch(
+	() => customFieldColumns.value.map(d => d.id).join(','),
+	async () => {
+		// Seed the enabled state for newly offered custom-field columns.
+		for (const def of customFieldColumns.value) {
+			const key = customFieldColumnKey(def.id)
+			if (typeof activeColumns.value[key] === 'undefined') {
+				activeColumns.value[key] = true
+			}
+		}
+		await registry.ensureProjectMetadata(props.projectId)
+	},
+	{immediate: true},
+)
 
 const taskList = useTaskList(
 	() => props.projectId, 
 	() => props.viewId, 
 	sortBy.value,
-	() => ['comment_count', 'is_unread'],
+	() => customFieldColumns.value.length > 0
+		? ['comment_count', 'is_unread', 'custom_fields']
+		: ['comment_count', 'is_unread'],
 )
 
 const {
@@ -434,10 +493,10 @@ function ariaSort(order: 'asc' | 'desc' | 'none' | undefined): 'ascending' | 'de
 }
 
 // Allow sorting by multiple columns only when ctrl is pressed
-function sort(property: keyof SortBy, event?: MouseEvent) {
+function sort(property: string, event?: MouseEvent) {
 	const ctrlPressed = event?.ctrlKey || event?.metaKey
 
-	const currentOrder = sortBy.value[property]
+	const currentOrder = (sortBy.value as Record<string, 'asc' | 'desc' | 'none' | undefined>)[property]
 	let newOrder: 'asc' | 'desc' | 'none' | undefined = undefined
 	if (typeof currentOrder === 'undefined' || currentOrder === 'none') {
 		newOrder = 'desc'
@@ -450,21 +509,45 @@ function sort(property: keyof SortBy, event?: MouseEvent) {
 	}
 
 	if (newOrder) {
-		sortBy.value[property] = newOrder
+		(sortBy.value as Record<string, 'asc' | 'desc' | 'none'>)[property] = newOrder
 	} else {
-		delete sortBy.value[property]
+		delete (sortBy.value as Record<string, 'asc' | 'desc' | 'none'>)[property]
 	}
 
 	setActiveColumnsSortParam()
 }
 
+// Maps a sort key to its column-visibility key. Fixed columns use camelCase
+// (due_date -> dueDate); custom-field columns use the per-definition key.
+function columnKeyForSortKey(sortKey: string): string | undefined {
+	if (sortKey.startsWith('custom_fields.')) {
+		const def = customFieldColumns.value.find(d => d.machineKey === sortKey.slice('custom_fields.'.length))
+		return def ? customFieldColumnKey(def.id) : undefined
+	}
+	return camelCase(sortKey)
+}
+
 function setActiveColumnsSortParam() {
-	sortByParam.value = Object.keys(sortBy.value)
-		.filter(prop => activeColumns.value[camelCase(prop)])
-		.reduce((obj, key) => {
-			obj[key] = sortBy.value[key]
-			return obj
-		}, {})
+	const result: Record<string, 'asc' | 'desc' | 'none'> = {}
+	for (const key of Object.keys(sortBy.value)) {
+		const columnKey = columnKeyForSortKey(key)
+		if (columnKey && activeColumns.value[columnKey]) {
+			result[key] = sortBy.value[key]
+		}
+	}
+	sortByParam.value = result
+}
+
+function taskCustomFieldValue(task: ITask, defId: number) {
+	return task.customFields?.find(f => f.definitionId === defId)?.value
+}
+
+function customFieldSortKey(def: {machineKey: string}): string {
+	return `custom_fields.${def.machineKey}`
+}
+
+function customFieldSortOrder(def: {machineKey: string}): 'asc' | 'desc' | 'none' | undefined {
+	return (sortBy.value as Record<string, 'asc' | 'desc' | 'none' | undefined>)[customFieldSortKey(def)]
 }
 
 // TODO: re-enable opening task detail in modal

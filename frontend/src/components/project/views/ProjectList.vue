@@ -9,6 +9,7 @@
 			<div class="filter-container">
 				<SortPopup
 					v-model="sortByParam"
+					:custom-field-definitions="sortableCustomFieldDefinitions"
 				/>
 				<FilterPopup
 					v-if="!isSavedFilter(project)"
@@ -76,6 +77,7 @@
 								:can-mark-as-done="canWrite || isPseudoProject"
 								:the-task="t"
 								:all-tasks="allTasks"
+								:show-custom-fields="projectId > 0"
 								@taskUpdated="updateTasks"
 							>
 								<span
@@ -122,6 +124,7 @@ import {isSavedFilter, useSavedFilter} from '@/services/savedFilter'
 
 import {useBaseStore} from '@/stores/base'
 import {useTaskStore} from '@/stores/tasks'
+import {useCustomFieldRegistryStore} from '@/stores/customFieldRegistry'
 
 import type {IProject} from '@/modelTypes/IProject'
 import type {IProjectView} from '@/modelTypes/IProjectView'
@@ -156,7 +159,7 @@ const {
 	{position: 'asc'},
 	() => projectId.value === -1
 		? ['comment_count', 'is_unread']
-		: ['subtasks', 'comment_count', 'is_unread'],
+		: ['subtasks', 'comment_count', 'is_unread', 'custom_fields'],
 )
 
 const taskPositionService = ref(new TaskPositionService())
@@ -176,8 +179,23 @@ const isPositionSorting = computed(() => 'position' in sortByParam.value)
 
 const baseStore = useBaseStore()
 const taskStore = useTaskStore()
+const registry = useCustomFieldRegistryStore()
 const {handleTaskDropToProject} = useTaskDragToProject()
 const project = computed(() => baseStore.currentProject)
+
+const sortableCustomFieldDefinitions = computed(() => projectId.value > 0
+	? registry.getDefinitionsForProject(projectId.value)
+	: [])
+
+watch(
+	() => projectId.value,
+	async (id) => {
+		if (id > 0) {
+			await registry.ensureProjectMetadata(id)
+		}
+	},
+	{immediate: true},
+)
 
 const canWrite = computed(() => {
 	return project.value?.maxPermission > Permissions.READ && project.value?.id > 0

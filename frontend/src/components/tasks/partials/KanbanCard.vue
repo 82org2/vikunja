@@ -76,6 +76,19 @@
 				class="task-progress"
 				:value="task.percentDone * 100"
 			/>
+			<div
+				v-if="cardCustomFields.length > 0"
+				class="custom-field-metadata"
+			>
+				<span
+					v-for="cf in cardCustomFields"
+					:key="cf.definition.id"
+					class="custom-field-metadata__item"
+				>
+					<span class="custom-field-metadata__label">{{ cf.definition.title }}:</span>
+					<CustomFieldValueInline :value="cf.value?.value" />
+				</span>
+			</div>
 			<div class="footer">
 				<Labels :labels="task.labels" />
 				<PriorityLabel
@@ -148,6 +161,8 @@ import AssigneeList from '@/components/tasks/partials/AssigneeList.vue'
 import {playPopSound} from '@/helpers/playPop'
 import {isEditorContentEmpty} from '@/helpers/editorContentEmpty'
 import {useProjectStore} from '@/stores/projects'
+import {useCustomFieldRegistryStore} from '@/stores/customFieldRegistry'
+import CustomFieldValueInline from '@/components/tasks/partials/CustomFieldValueInline.vue'
 import {TASK_REPEAT_MODES} from '@/types/IRepeatMode'
 
 const props = withDefaults(defineProps<{
@@ -169,6 +184,15 @@ const loadingInternal = ref(false)
 const color = computed(() => getHexColor(props.task.hexColor))
 
 const projectStore = useProjectStore()
+const registry = useCustomFieldRegistryStore()
+
+const cardCustomFields = computed(() => {
+	if (!props.task.projectId) {
+		return []
+	}
+	return registry.mergeTaskValues(props.task.projectId, props.task.customFields ?? [])
+		.filter(entry => entry.definition.showOnCard && entry.value)
+})
 
 const projectTitle = computed(() => {
 	if (props.projectId === props.task.projectId) {
